@@ -73,9 +73,6 @@
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net481' and '$(OS)' == 'Linux'">
-  <SkipBuild>true</SkipBuild>
-</PropertyGroup>
 
 
 </Project>
