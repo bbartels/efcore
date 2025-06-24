@@ -62,5 +62,20 @@
   </ItemGroup>
 
   <Import Project="eng\testing\linker\trimmingTests.props" Condition="'$(IsPublishedAppTestProject)' == 'true'" />
+    <PropertyGroup>
+    <!-- Output binaries to /artifacts/ProjectName/ -->
+    <BaseOutputPath>$(SolutionDir)artifacts/bin/$(MSBuildProjectName)/Debug/$(TargetFramework)/</BaseOutputPath>
+    <OutputPath>$(SolutionDir)artifacts/bin/$(MSBuildProjectName)/Debug/$(TargetFramework)/</OutputPath>
+
+    <!-- Ensure debug info is generated -->
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net481' and '$(OS)' == 'Linux'">
+  <SkipBuild>true</SkipBuild>
+</PropertyGroup>
+
 
 </Project>

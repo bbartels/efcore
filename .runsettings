@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <!-- Use TestCaseFilter to exclude assemblies that contain net481 -->
+    <TestCaseFilter>FullyQualifiedName !~ net481</TestCaseFilter>
+  </RunConfiguration>
+</RunSettings>
+

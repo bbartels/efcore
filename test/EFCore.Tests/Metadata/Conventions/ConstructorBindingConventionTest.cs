@@ -42,6 +42,26 @@ public class ConstructorBindingConventionTest
         Assert.Equal(0, bindings.Count);
     }
 
+    [ConditionalFact]
+    public void Test1231()
+    {
+        var constructorBinding = GetBinding<Test>();
+
+        Assert.NotNull(constructorBinding);
+        Assert.Empty(constructorBinding.Constructor.GetParameters());
+        Assert.Empty(constructorBinding.ParameterBindings);
+    }
+
+    private class Test1
+    {
+
+    }
+
+    private class Test(Test1 test)
+    {
+        private int Test3() => test.GetType().ToString().Length;
+    }
+
     private class BlogSeveralNoServices : Blog
     {
         public BlogSeveralNoServices()

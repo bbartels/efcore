@@ -1,0 +1,11 @@
+{
+  "MSBuild": {
+    "UseLegacySdkResolver": false,
+    "LoadProjectsOnDemand": false
+  },
+  "RoslynExtensionsOptions": {
+    "EnableAnalyzersSupport": true,
+    "LocationPaths": [ "artifacts/bin/" ]
+  }
+}
+
