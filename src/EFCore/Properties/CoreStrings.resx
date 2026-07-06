@@ -321,6 +321,9 @@
   <data name="CompiledQueryDifferentModel" xml:space="preserve">
     <value>The compiled query '{queryExpression}' was executed with a different model than it was compiled against. Compiled queries can only be used with a single model.</value>
   </data>
+  <data name="ComplexCollectionConstructorBinding" xml:space="preserve">
+    <value>The complex collection property '{type}.{property}' cannot be bound to a constructor parameter. Complex collection properties cannot be injected via the constructor; use a settable property instead.</value>
+  </data>
   <data name="ComplexCollectionEntryDeletedEntity" xml:space="preserve">
     <value>The complex entry at ordinal '{ordinal}' for the collection '{declaringType}.{collection}' cannot be accessed as the containing entry is in the deleted state.</value>
   </data>
@@ -377,6 +380,9 @@
   </data>
   <data name="ComplexPropertyChainOnCollection" xml:space="preserve">
     <value>The member '{member}' on type '{type}' is a complex collection property and cannot be traversed in a chained property access. Configure properties on complex collection element types using the 'ComplexCollection' method.</value>
+  </data>
+  <data name="ComplexPropertyConstructorBindingNotSupported" xml:space="preserve">
+    <value>The complex property '{type}.{property}' cannot be bound to a constructor parameter because its value is not materialized directly. Constructor binding is not supported for complex properties mapped to JSON documents.</value>
   </data>
   <data name="ComplexPropertyIndexer" xml:space="preserve">
     <value>Adding the complex property '{type}.{property}' as an indexer property isn't supported. See https://github.com/dotnet/efcore/issues/31244 for more information.</value>

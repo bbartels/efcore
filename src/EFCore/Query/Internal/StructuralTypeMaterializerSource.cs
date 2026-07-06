@@ -70,6 +70,7 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
         }
 
         var constructorBinding = ModifyBindings(structuralType, structuralType.ConstructorBinding!);
+        ValidateComplexPropertyBindings(structuralType, constructorBinding);
         var bindingInfo = new ParameterBindingInfo(parameters, materializationContextExpression, this);
         var instanceVariable = Variable(constructorBinding.RuntimeType, entityInstanceName);
         bindingInfo.ServiceInstances.Add(instanceVariable);
@@ -644,6 +645,7 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
         var nullable = false;
 
         binding = ModifyBindings(entityType, binding);
+        ValidateComplexPropertyBindings(entityType, binding);
 
         var materializationContextExpression = Parameter(typeof(MaterializationContext), "mc");
         var bindingInfo = new ParameterBindingInfo(
@@ -682,6 +684,20 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
                         nullable),
                 materializationContextExpression)
             .Compile();
+    }
+
+    private void ValidateComplexPropertyBindings(ITypeBase structuralType, InstantiationBinding binding)
+    {
+        foreach (var parameterBinding in binding.ParameterBindings)
+        {
+            if (parameterBinding is ComplexPropertyParameterBinding complexPropertyBinding
+                && !ReadComplexTypeDirectly(complexPropertyBinding.ComplexProperty.ComplexType))
+            {
+                throw new InvalidOperationException(
+                    CoreStrings.ComplexPropertyConstructorBindingNotSupported(
+                        structuralType.DisplayName(), complexPropertyBinding.ComplexProperty.Name));
+            }
+        }
     }
 
     private InstantiationBinding ModifyBindings(ITypeBase structuralType, InstantiationBinding binding)

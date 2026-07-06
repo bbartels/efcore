@@ -93,7 +93,8 @@ public class PropertyParameterBindingFactory : IPropertyParameterBindingFactory
 
         foreach (var complexProperty in complexProperties)
         {
-            if (complexProperty.ClrType != parameterType)
+            if (complexProperty.IsCollection
+                || complexProperty.ClrType != parameterType)
             {
                 continue;
             }

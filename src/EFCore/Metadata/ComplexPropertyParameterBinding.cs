@@ -22,6 +22,14 @@ public class ComplexPropertyParameterBinding : ParameterBinding
     public ComplexPropertyParameterBinding(IComplexProperty complexProperty)
         : base(complexProperty.ClrType, complexProperty)
     {
+        if (complexProperty.IsCollection)
+        {
+            throw new ArgumentException(
+                CoreStrings.ComplexCollectionConstructorBinding(
+                    complexProperty.DeclaringType.DisplayName(), complexProperty.Name),
+                nameof(complexProperty));
+        }
+
         ComplexProperty = complexProperty;
     }
 
@@ -48,7 +56,7 @@ public class ComplexPropertyParameterBinding : ParameterBinding
                 "complexType",
                 ComplexProperty.ClrType,
                 ComplexProperty.IsNullable,
-                bindingInfo.QueryTrackingBehavior),
+                QueryTrackingBehavior: null),
             bindingInfo.MaterializationContextExpression);
     }
 
