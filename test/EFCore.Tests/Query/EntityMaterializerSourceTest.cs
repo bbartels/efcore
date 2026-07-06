@@ -536,6 +536,74 @@ public class EntityMaterializerSourceTest
         public int Id { get; set; }
     }
 
+    [Fact]
+    public void Can_create_materializer_for_entity_with_complex_property_constructor_binding()
+    {
+        using var context = new SomeEntityContext(b =>
+        {
+            b.Entity<EntityWithComplexProperty>()
+                .ComplexProperty(e => e.Address);
+
+            var et = (EntityType)b.Entity<EntityWithComplexProperty>().Metadata;
+            var cp = et.FindComplexProperty(nameof(EntityWithComplexProperty.Address))!;
+
+            et.ConstructorBinding = new ConstructorBinding(
+                typeof(EntityWithComplexProperty)
+                    .GetTypeInfo()
+                    .DeclaredConstructors
+                    .Single(c => c.GetParameters().Length == 1),
+                [new ComplexPropertyParameterBinding(cp)]);
+        });
+
+        var entityType = context.Model.FindEntityType(typeof(EntityWithComplexProperty))!;
+
+        var source = new StructuralTypeMaterializerSource(new StructuralTypeMaterializerSourceDependencies([]));
+        var factory = GetMaterializer(source, entityType);
+
+        var entity = (EntityWithComplexProperty)factory(
+            new MaterializationContext(
+                new ValueBuffer([42, "Springfield", "Main St"]),
+                context));
+
+        Assert.Equal(42, entity.Id);
+        Assert.Equal("Main St", entity.Address.Street);
+        Assert.Equal("Springfield", entity.Address.City);
+        Assert.True(entity.ComplexPropertyConstructorUsed);
+    }
+
+    private class AddressForTest
+    {
+        public AddressForTest()
+        {
+        }
+
+        public AddressForTest(string street, string city)
+        {
+            Street = street;
+            City = city;
+        }
+
+        public string Street { get; set; } = "";
+        public string City { get; set; } = "";
+    }
+
+    private class EntityWithComplexProperty
+    {
+        public EntityWithComplexProperty()
+        {
+        }
+
+        public EntityWithComplexProperty(AddressForTest address)
+        {
+            Address = address;
+            ComplexPropertyConstructorUsed = true;
+        }
+
+        public int Id { get; set; }
+        public AddressForTest Address { get; set; } = null!;
+        public bool ComplexPropertyConstructorUsed { get; }
+    }
+
     protected virtual ModelBuilder CreateConventionalModelBuilder(bool sensitiveDataLoggingEnabled = false)
         => InMemoryTestHelpers.Instance.CreateConventionBuilder();
 

@@ -244,6 +244,7 @@ public class RuntimeModelConvention : IModelFinalizedConvention
                 (entityType.FindProperty(property.Name)
                     ?? entityType.FindServiceProperty(property.Name)
                     ?? entityType.FindNavigation(property.Name)
+                    ?? entityType.FindComplexProperty(property.Name)
                     ?? (IPropertyBase?)entityType.FindSkipNavigation(property.Name))!).ToArray());
 
     private static InstantiationBinding? Create(InstantiationBinding? instantiationBinding, RuntimeEntityType entityType)

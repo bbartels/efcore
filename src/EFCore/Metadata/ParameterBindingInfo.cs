@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using Microsoft.EntityFrameworkCore.Query;
+
 namespace Microsoft.EntityFrameworkCore.Metadata;
 
 /// <summary>
@@ -44,6 +46,24 @@ public readonly struct ParameterBindingInfo
     }
 
     /// <summary>
+    ///     Creates a new <see cref="ParameterBindingInfo" /> to define a parameter binding.
+    /// </summary>
+    /// <param name="materializerSourceParameters">Parameters for the materialization that is happening.</param>
+    /// <param name="materializationContextExpression">The expression tree from which the parameter value will come.</param>
+    /// <param name="materializerSource">The materializer source used to generate expressions for nested complex type bindings.</param>
+    public ParameterBindingInfo(
+        StructuralTypeMaterializerSourceParameters materializerSourceParameters,
+        Expression materializationContextExpression,
+        IStructuralTypeMaterializerSource? materializerSource)
+    {
+        StructuralType = materializerSourceParameters.StructuralType;
+        QueryTrackingBehavior = materializerSourceParameters.QueryTrackingBehavior;
+        InstanceName = materializerSourceParameters.InstanceName;
+        MaterializationContextExpression = materializationContextExpression;
+        MaterializerSource = materializerSource;
+    }
+
+    /// <summary>
     ///     The entity or complex type for this binding.
     /// </summary>
     public ITypeBase StructuralType { get; }
@@ -62,6 +82,12 @@ public readonly struct ParameterBindingInfo
     ///     The expression tree from which the parameter value will come.
     /// </summary>
     public Expression MaterializationContextExpression { get; }
+
+    /// <summary>
+    ///     The materializer source used for generating expressions when binding complex property parameters.
+    ///     Set when materializing types that may have complex property constructor parameters.
+    /// </summary>
+    public IStructuralTypeMaterializerSource? MaterializerSource { get; }
 
     /// <summary>
     ///     Expressions holding initialized instances for service properties.

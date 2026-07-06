@@ -70,7 +70,7 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
         }
 
         var constructorBinding = ModifyBindings(structuralType, structuralType.ConstructorBinding!);
-        var bindingInfo = new ParameterBindingInfo(parameters, materializationContextExpression);
+        var bindingInfo = new ParameterBindingInfo(parameters, materializationContextExpression, this);
         var instanceVariable = Variable(constructorBinding.RuntimeType, entityInstanceName);
         bindingInfo.ServiceInstances.Add(instanceVariable);
 
@@ -647,7 +647,7 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
 
         var materializationContextExpression = Parameter(typeof(MaterializationContext), "mc");
         var bindingInfo = new ParameterBindingInfo(
-            new StructuralTypeMaterializerSourceParameters(entityType, "instance", entityType.ClrType, nullable, null), materializationContextExpression);
+            new StructuralTypeMaterializerSourceParameters(entityType, "instance", entityType.ClrType, nullable, null), materializationContextExpression, this);
 
         var blockExpressions = new List<Expression>();
         var instanceVariable = Variable(binding.RuntimeType, "instance");
