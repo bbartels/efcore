@@ -808,8 +808,8 @@ public class ConstructorBindingConventionTest
 
     private class Address
     {
-        public string Street { get; set; }
-        public string City { get; set; }
+        public string Street { get; set; } = "";
+        public string City { get; set; } = "";
     }
 
     [Fact]
@@ -905,6 +905,6 @@ public class ConstructorBindingConventionTest
 
         public int Id { get; set; }
         public string Title { get; set; }
-        public Address Address { get; set; }
+        public Address Address { get; set; } = null!;
     }
 }
