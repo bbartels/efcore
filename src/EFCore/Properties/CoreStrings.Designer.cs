@@ -567,6 +567,14 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
                 queryExpression);
 
         /// <summary>
+        ///     The complex collection property '{type}.{property}' cannot be bound to a constructor parameter. Complex collection properties cannot be injected via the constructor; use a settable property instead.
+        /// </summary>
+        public static string ComplexCollectionConstructorBinding(object? type, object? property)
+            => string.Format(
+                GetString("ComplexCollectionConstructorBinding", nameof(type), nameof(property)),
+                type, property);
+
+        /// <summary>
         ///     The complex entry at ordinal '{ordinal}' for the collection '{declaringType}.{collection}' cannot be accessed as the containing entry is in the deleted state.
         /// </summary>
         public static string ComplexCollectionEntryDeletedEntity(object? ordinal, object? declaringType, object? collection)
@@ -717,6 +725,14 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             => string.Format(
                 GetString("ComplexPropertyChainOnCollection", nameof(member), nameof(type)),
                 member, type);
+
+        /// <summary>
+        ///     The complex property '{type}.{property}' cannot be bound to a constructor parameter because its value is not materialized directly. Constructor binding is not supported for complex properties mapped to JSON documents.
+        /// </summary>
+        public static string ComplexPropertyConstructorBindingNotSupported(object? type, object? property)
+            => string.Format(
+                GetString("ComplexPropertyConstructorBindingNotSupported", nameof(type), nameof(property)),
+                type, property);
 
         /// <summary>
         ///     Adding the complex property '{type}.{property}' as an indexer property isn't supported. See https://github.com/dotnet/efcore/issues/31244 for more information.

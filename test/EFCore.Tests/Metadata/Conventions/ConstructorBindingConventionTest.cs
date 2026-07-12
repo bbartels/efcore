@@ -679,6 +679,298 @@ public class ConstructorBindingConventionTest
     }
 
     [Fact]
+    public void Binds_to_complex_property_parameter()
+    {
+        var binding = GetBindingWithComplexProperty<BlogWithComplexProperty>(
+            entityType =>
+            {
+                var cp = entityType.AddComplexProperty(nameof(Blog.Address), typeof(Address), typeof(Address))!;
+                cp.ComplexType.AddProperty(nameof(Address.Street), typeof(string));
+                cp.ComplexType.AddProperty(nameof(Address.City), typeof(string));
+            });
+
+        var parameters = binding.Constructor.GetParameters();
+        var bindings = binding.ParameterBindings;
+
+        Assert.Single(parameters);
+        Assert.Single(bindings);
+
+        Assert.Equal("address", parameters[0].Name);
+        Assert.IsType<ComplexPropertyParameterBinding>(bindings[0]);
+        Assert.Equal("Address", bindings[0].ConsumedProperties.Single().Name);
+    }
+
+#pragma warning disable CS9113 // Parameters are unread
+    private class BlogWithComplexProperty : Blog
+    {
+        public BlogWithComplexProperty(Address address)
+        {
+        }
+    }
+#pragma warning restore CS9113
+
+    [Fact]
+    public void Binds_to_complex_property_parameter_with_pascal_case_name()
+    {
+        var binding = GetBindingWithComplexProperty<BlogWithComplexPropertyPascal>(
+            entityType =>
+            {
+                var cp = entityType.AddComplexProperty(nameof(Blog.Address), typeof(Address), typeof(Address))!;
+                cp.ComplexType.AddProperty(nameof(Address.Street), typeof(string));
+                cp.ComplexType.AddProperty(nameof(Address.City), typeof(string));
+            });
+
+        var parameters = binding.Constructor.GetParameters();
+        var bindings = binding.ParameterBindings;
+
+        Assert.Single(parameters);
+        Assert.Single(bindings);
+
+        Assert.Equal("Address", parameters[0].Name);
+        Assert.IsType<ComplexPropertyParameterBinding>(bindings[0]);
+        Assert.Equal("Address", bindings[0].ConsumedProperties.Single().Name);
+    }
+
+#pragma warning disable CS9113 // Parameters are unread
+    private class BlogWithComplexPropertyPascal : Blog
+    {
+        public BlogWithComplexPropertyPascal(Address Address)
+        {
+        }
+    }
+#pragma warning restore CS9113
+
+    [Fact]
+    public void Does_not_bind_complex_property_when_parameter_type_does_not_match()
+    {
+        // Constructor has 'string title' which matches the scalar 'Title' property, not the complex 'Address' property.
+        var binding = GetBindingWithComplexProperty<BlogWithMismatchedComplexParam>(
+            entityType =>
+            {
+                var cp = entityType.AddComplexProperty(nameof(Blog.Address), typeof(Address), typeof(Address))!;
+                cp.ComplexType.AddProperty(nameof(Address.Street), typeof(string));
+                cp.ComplexType.AddProperty(nameof(Address.City), typeof(string));
+            });
+
+        Assert.Single(binding.ParameterBindings);
+        Assert.IsType<PropertyParameterBinding>(binding.ParameterBindings[0]);
+        Assert.Equal(nameof(Blog.Title), binding.ParameterBindings[0].ConsumedProperties.Single().Name);
+    }
+
+#pragma warning disable CS9113 // Parameters are unread
+    private class BlogWithMismatchedComplexParam : Blog
+    {
+        public BlogWithMismatchedComplexParam(string title)
+        {
+        }
+    }
+#pragma warning restore CS9113
+
+    [Fact]
+    public void Throws_if_complex_property_type_does_not_match()
+    {
+        var message = Assert.Throws<InvalidOperationException>(() =>
+            GetBindingWithComplexProperty<BlogWithWrongComplexPropertyType>(
+                entityType =>
+                {
+                    var cp = entityType.AddComplexProperty(nameof(Blog.Address), typeof(Address), typeof(Address))!;
+                    cp.ComplexType.AddProperty(nameof(Address.Street), typeof(string));
+                    cp.ComplexType.AddProperty(nameof(Address.City), typeof(string));
+                })).Message;
+
+        Assert.Equal(
+            CoreStrings.ConstructorNotFound(
+                nameof(BlogWithWrongComplexPropertyType),
+                Environment.NewLine
+                + "    "
+                + CoreStrings.ConstructorBindingFailed(
+                    "address', 'extraParam", "BlogWithWrongComplexPropertyType(string address, int extraParam)")
+                + Environment.NewLine),
+            message);
+    }
+
+#pragma warning disable CS9113 // Parameters are unread
+    private class BlogWithWrongComplexPropertyType : Blog
+    {
+        // Parameter type doesn't match - constructor has no bindable parameters
+        public BlogWithWrongComplexPropertyType(string address, int extraParam)
+        {
+        }
+    }
+#pragma warning restore CS9113
+
+    [Fact]
+    public void Binds_to_complex_property_parameter_together_with_scalar_properties()
+    {
+        var binding = GetBindingWithComplexProperty<BlogWithComplexPropertyAndScalars>(
+            entityType =>
+            {
+                var cp = entityType.AddComplexProperty(nameof(Blog.Address), typeof(Address), typeof(Address))!;
+                cp.ComplexType.AddProperty(nameof(Address.Street), typeof(string));
+                cp.ComplexType.AddProperty(nameof(Address.City), typeof(string));
+            });
+
+        var parameters = binding.Constructor.GetParameters();
+        var bindings = binding.ParameterBindings;
+
+        Assert.Equal(3, parameters.Length);
+        Assert.Equal(3, bindings.Count);
+
+        Assert.IsType<PropertyParameterBinding>(bindings[0]);
+        Assert.Equal("Id", bindings[0].ConsumedProperties.Single().Name);
+        Assert.IsType<PropertyParameterBinding>(bindings[1]);
+        Assert.Equal("Title", bindings[1].ConsumedProperties.Single().Name);
+        Assert.IsType<ComplexPropertyParameterBinding>(bindings[2]);
+        Assert.Equal("Address", bindings[2].ConsumedProperties.Single().Name);
+    }
+
+#pragma warning disable CS9113 // Parameters are unread
+    private class BlogWithComplexPropertyAndScalars : Blog
+    {
+        public BlogWithComplexPropertyAndScalars(int id, string title, Address address)
+        {
+        }
+    }
+#pragma warning restore CS9113
+
+    [Fact]
+    public void Does_not_bind_complex_collection_property_parameter()
+    {
+        // The constructor taking the complex collection cannot be bound, so the smaller constructor is used.
+        var binding = GetBindingWithComplexProperty<BlogWithComplexCollection>(
+            entityType =>
+            {
+                var cp = entityType.AddComplexProperty(
+                    nameof(BlogWithComplexCollection.Addresses), typeof(List<Address>), typeof(Address), collection: true)!;
+                cp.ComplexType.AddProperty(nameof(Address.Street), typeof(string));
+                cp.ComplexType.AddProperty(nameof(Address.City), typeof(string));
+            });
+
+        Assert.Single(binding.ParameterBindings);
+        Assert.IsType<PropertyParameterBinding>(binding.ParameterBindings[0]);
+        Assert.Equal(nameof(Blog.Id), binding.ParameterBindings[0].ConsumedProperties.Single().Name);
+    }
+
+#pragma warning disable CS9113 // Parameters are unread
+    private class BlogWithComplexCollection : Blog
+    {
+        public BlogWithComplexCollection(int id)
+        {
+        }
+
+        public BlogWithComplexCollection(int id, List<Address> addresses)
+        {
+        }
+
+        public List<Address> Addresses { get; set; } = [];
+    }
+#pragma warning restore CS9113
+
+    [Fact]
+    public void Throws_when_creating_complex_property_binding_for_collection()
+    {
+        var entityType = ((IMutableModel)new Model()).AddEntityType(typeof(BlogWithComplexCollection));
+        entityType.AddProperty(nameof(Blog.Id), typeof(int));
+        entityType.AddProperty(nameof(Blog.Title), typeof(string));
+        var complexProperty = entityType.AddComplexProperty(
+            nameof(BlogWithComplexCollection.Addresses), typeof(List<Address>), typeof(Address), collection: true)!;
+        complexProperty.ComplexType.AddProperty(nameof(Address.Street), typeof(string));
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => new ComplexPropertyParameterBinding((IComplexProperty)complexProperty));
+
+        Assert.StartsWith(
+            CoreStrings.ComplexCollectionConstructorBinding(
+                nameof(BlogWithComplexCollection), nameof(BlogWithComplexCollection.Addresses)),
+            exception.Message);
+    }
+
+    [Fact]
+    public void Binds_to_nested_complex_property_parameter_on_complex_type()
+    {
+        var entityType = ((IMutableModel)new Model()).AddEntityType(typeof(BlogWithComplexPropertyWithNested));
+        entityType.AddProperty(nameof(Blog.Id), typeof(int));
+        entityType.AddProperty(nameof(Blog.Title), typeof(string));
+
+        var cp = entityType.AddComplexProperty(
+            nameof(BlogWithComplexPropertyWithNested.FullAddress), typeof(AddressWithGeo), typeof(AddressWithGeo))!;
+        cp.ComplexType.AddProperty(nameof(AddressWithGeo.Street), typeof(string));
+        var nested = cp.ComplexType.AddComplexProperty(nameof(AddressWithGeo.Location), typeof(Geo), typeof(Geo))!;
+        nested.ComplexType.AddProperty(nameof(Geo.Latitude), typeof(double));
+        nested.ComplexType.AddProperty(nameof(Geo.Longitude), typeof(double));
+
+        var model = (Model)entityType.Model;
+        var context = new ConventionContext<IConventionModelBuilder>(model.ConventionDispatcher);
+        new ConstructorBindingConvention(CreateDependencies()).ProcessModelFinalizing(model.Builder, context);
+
+        var entityBinding = (ConstructorBinding)((EntityType)entityType).ConstructorBinding;
+        Assert.IsType<ComplexPropertyParameterBinding>(entityBinding.ParameterBindings.Single());
+        Assert.Equal(
+            nameof(BlogWithComplexPropertyWithNested.FullAddress),
+            entityBinding.ParameterBindings.Single().ConsumedProperties.Single().Name);
+
+        var complexTypeBinding = (ConstructorBinding)((ComplexType)cp.ComplexType).ConstructorBinding;
+        Assert.NotNull(complexTypeBinding);
+        var bindings = complexTypeBinding.ParameterBindings;
+
+        Assert.Equal(2, bindings.Count);
+        Assert.IsType<PropertyParameterBinding>(bindings[0]);
+        Assert.Equal(nameof(AddressWithGeo.Street), bindings[0].ConsumedProperties.Single().Name);
+        Assert.IsType<ComplexPropertyParameterBinding>(bindings[1]);
+        Assert.Equal(nameof(AddressWithGeo.Location), bindings[1].ConsumedProperties.Single().Name);
+    }
+
+#pragma warning disable CS9113 // Parameters are unread
+    private class BlogWithComplexPropertyWithNested : Blog
+    {
+        public BlogWithComplexPropertyWithNested(AddressWithGeo fullAddress)
+        {
+        }
+
+        public AddressWithGeo FullAddress { get; set; } = null!;
+    }
+
+    private class AddressWithGeo
+    {
+        public AddressWithGeo(string street, Geo location)
+        {
+        }
+
+        public string Street { get; set; } = "";
+        public Geo Location { get; set; } = null!;
+    }
+
+    private class Geo
+    {
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+    }
+#pragma warning restore CS9113
+
+    private ConstructorBinding GetBindingWithComplexProperty<TEntity>(Action<IMutableEntityType> configure)
+    {
+        var entityType = ((IMutableModel)new Model()).AddEntityType(typeof(TEntity));
+        entityType.AddProperty(nameof(Blog.Id), typeof(int));
+        entityType.AddProperty(nameof(Blog.Title), typeof(string));
+
+        configure(entityType);
+
+        var model = (Model)entityType.Model;
+        var context = new ConventionContext<IConventionModelBuilder>(model.ConventionDispatcher);
+
+        var convention = new ConstructorBindingConvention(CreateDependencies());
+        convention.ProcessModelFinalizing(model.Builder, context);
+
+        return (ConstructorBinding)((EntityType)entityType).ConstructorBinding;
+    }
+
+    private class Address
+    {
+        public string Street { get; set; } = "";
+        public string City { get; set; } = "";
+    }
+
+    [Fact]
     public void Throws_if_no_usable_constructor_due_to_bad_type()
         => Assert.Equal(
             CoreStrings.ConstructorNotFound(
@@ -771,5 +1063,6 @@ public class ConstructorBindingConventionTest
 
         public int Id { get; set; }
         public string Title { get; set; }
+        public Address Address { get; set; } = null!;
     }
 }

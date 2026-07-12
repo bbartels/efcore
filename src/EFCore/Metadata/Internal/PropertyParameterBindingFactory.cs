@@ -21,7 +21,8 @@ public class PropertyParameterBindingFactory : IPropertyParameterBindingFactory
         IEntityType entityType,
         Type parameterType,
         string parameterName)
-        => FindParameter(entityType.GetProperties(), parameterType, parameterName);
+        => FindParameter(entityType.GetProperties(), parameterType, parameterName)
+            ?? FindComplexPropertyParameter(entityType.GetComplexProperties(), parameterType, parameterName);
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -33,7 +34,8 @@ public class PropertyParameterBindingFactory : IPropertyParameterBindingFactory
         IComplexType complexType,
         Type parameterType,
         string parameterName)
-        => FindParameter(complexType.GetProperties(), parameterType, parameterName);
+        => FindParameter(complexType.GetProperties(), parameterType, parameterName)
+            ?? FindComplexPropertyParameter(complexType.GetComplexProperties(), parameterType, parameterName);
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -80,5 +82,32 @@ public class PropertyParameterBindingFactory : IPropertyParameterBindingFactory
             "m_" + parameterName,
             "m_" + pascalized
         ];
+    }
+
+    private static ParameterBinding? FindComplexPropertyParameter(
+        IEnumerable<IComplexProperty> complexProperties,
+        Type parameterType,
+        string parameterName)
+    {
+        var candidateNames = GetCandidatePropertyNames(parameterName);
+
+        foreach (var complexProperty in complexProperties)
+        {
+            if (complexProperty.IsCollection
+                || complexProperty.ClrType != parameterType)
+            {
+                continue;
+            }
+
+            foreach (var name in candidateNames)
+            {
+                if (name.Equals(complexProperty.Name, StringComparison.Ordinal))
+                {
+                    return new ComplexPropertyParameterBinding(complexProperty);
+                }
+            }
+        }
+
+        return null;
     }
 }

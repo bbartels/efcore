@@ -26,6 +26,9 @@ public class ObjectArrayParameterBinding : ParameterBinding
             Check.NotNull(bindings).SelectMany(b => b.ConsumedProperties).ToArray())
         => _bindings = bindings;
 
+    internal IReadOnlyList<ParameterBinding> Bindings
+        => _bindings;
+
     /// <summary>
     ///     Creates an expression tree representing the binding of the value of a property from a
     ///     materialization expression to a parameter of the constructor, factory method, etc.
