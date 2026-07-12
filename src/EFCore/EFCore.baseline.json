@@ -1995,6 +1995,20 @@
       ]
     },
     {
+      "Type": "class Microsoft.EntityFrameworkCore.Metadata.ComplexPropertyParameterBinding : Microsoft.EntityFrameworkCore.Metadata.ParameterBinding",
+      "Methods": [
+        {
+          "Member": "ComplexPropertyParameterBinding(Microsoft.EntityFrameworkCore.Metadata.IComplexProperty complexProperty);"
+        },
+        {
+          "Member": "override System.Linq.Expressions.Expression BindToParameter(Microsoft.EntityFrameworkCore.Metadata.ParameterBindingInfo bindingInfo);"
+        },
+        {
+          "Member": "override Microsoft.EntityFrameworkCore.Metadata.ParameterBinding With(Microsoft.EntityFrameworkCore.Metadata.IPropertyBase[] consumedProperties);"
+        }
+      ]
+    },
+    {
       "Type": "class Microsoft.EntityFrameworkCore.Metadata.Conventions.ComplexTypeAttributeConvention : Microsoft.EntityFrameworkCore.Metadata.Conventions.TypeAttributeConventionBase<System.ComponentModel.DataAnnotations.Schema.ComplexTypeAttribute>, Microsoft.EntityFrameworkCore.Metadata.Conventions.IComplexPropertyAddedConvention, Microsoft.EntityFrameworkCore.Metadata.Conventions.IConvention",
       "Methods": [
         {
@@ -3761,6 +3775,9 @@
           "Member": "static string CompiledQueryDifferentModel(object? queryExpression);"
         },
         {
+          "Member": "static string ComplexCollectionConstructorBinding(object? type, object? property);"
+        },
+        {
           "Member": "static string ComplexCollectionEntryDeletedEntity(object? ordinal, object? declaringType, object? collection);"
         },
         {
@@ -3816,6 +3833,9 @@
         },
         {
           "Member": "static string ComplexPropertyChainOnCollection(object? member, object? type);"
+        },
+        {
+          "Member": "static string ComplexPropertyConstructorBindingNotSupported(object? type, object? property);"
         },
         {
           "Member": "static string ComplexPropertyIndexer(object? type, object? property);"

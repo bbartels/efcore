@@ -14,6 +14,7 @@ public class ComplexTypeConstructorBindingSqliteTest
 
         using (var context = new CustomerContext(testStore))
         {
+            context.Database.EnsureDeleted();
             context.Database.EnsureCreatedResiliently();
             context.Add(
                 new Customer(new Address("Main St", "Springfield")) { Id = 1, Name = "Homer" });
@@ -38,6 +39,7 @@ public class ComplexTypeConstructorBindingSqliteTest
 
         using (var context = new CustomerContext(testStore))
         {
+            context.Database.EnsureDeleted();
             context.Database.EnsureCreatedResiliently();
             context.Add(
                 new Customer(new Address("Main St", "Springfield")) { Id = 1, Name = "Homer" });
@@ -60,6 +62,7 @@ public class ComplexTypeConstructorBindingSqliteTest
 
         using (var context = new CustomerContext(testStore))
         {
+            context.Database.EnsureDeleted();
             context.Database.EnsureCreatedResiliently();
             context.Add(
                 new Customer(new Address("Main St", "Springfield")) { Id = 1, Name = "Homer" });
@@ -69,7 +72,7 @@ public class ComplexTypeConstructorBindingSqliteTest
         using (var context = new CustomerContext(testStore))
         {
             var customer = context.Set<Customer>().Single();
-            customer.Address = new Address("Evergreen Terrace", "Springfield");
+            customer.Address.Street = "Evergreen Terrace";
             context.SaveChanges();
         }
 
@@ -89,6 +92,7 @@ public class ComplexTypeConstructorBindingSqliteTest
 
         using (var context = new CustomerContext(testStore))
         {
+            context.Database.EnsureDeleted();
             context.Database.EnsureCreatedResiliently();
             context.Add(
                 new Customer(new Address("Main St", "Springfield")) { Id = 1, Name = "Homer" });
@@ -111,6 +115,7 @@ public class ComplexTypeConstructorBindingSqliteTest
 
         using (var context = new WarehouseContext(testStore))
         {
+            context.Database.EnsureDeleted();
             context.Database.EnsureCreatedResiliently();
             context.Add(
                 new Warehouse(new Location("Docks", new GeoCoordinate(47.6, -122.3))) { Id = 1 });
@@ -129,12 +134,37 @@ public class ComplexTypeConstructorBindingSqliteTest
     }
 
     [Fact]
+    public async Task Readonly_record_struct_complex_property_is_injected_into_constructor_when_querying()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCtorBindingRecordStruct");
+
+        using (var context = new RecordStructCustomerContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new RecordStructCustomer(new RecordStructAddress("Main St", "Springfield")) { Id = 1 });
+            context.SaveChanges();
+        }
+
+        using (var context = new RecordStructCustomerContext(testStore))
+        {
+            var customer = context.Set<RecordStructCustomer>().Single();
+
+            Assert.Equal(1, customer.Id);
+            Assert.Equal("Main St", customer.Address.Street);
+            Assert.Equal("Springfield", customer.Address.City);
+        }
+    }
+
+    [Fact]
     public async Task Nullable_complex_property_injected_into_constructor_materializes_null()
     {
         await using var testStore = SqliteTestStore.Create("ComplexCtorBindingNullable");
 
         using (var context = new OptionalCustomerContext(testStore))
         {
+            context.Database.EnsureDeleted();
             context.Database.EnsureCreatedResiliently();
             context.Add(new OptionalCustomer(null) { Id = 1 });
             context.Add(new OptionalCustomer(new Address("Main St", "Springfield")) { Id = 2 });
@@ -158,6 +188,7 @@ public class ComplexTypeConstructorBindingSqliteTest
 
         using (var context = new JsonCustomerContext(testStore))
         {
+            context.Database.EnsureDeleted();
             context.Database.EnsureCreatedResiliently();
             context.Add(
                 new JsonCustomer(new Address("Main St", "Springfield")) { Id = 1 });
@@ -171,6 +202,30 @@ public class ComplexTypeConstructorBindingSqliteTest
                     nameof(JsonCustomer), nameof(JsonCustomer.Address)),
                 Assert.Throws<InvalidOperationException>(
                     () => context.Set<JsonCustomer>().Single()).Message);
+        }
+    }
+
+    [Fact]
+    public async Task Json_complex_property_uses_parameterless_fallback_constructor()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCtorBindingJsonFallback");
+
+        using (var context = new JsonFallbackCustomerContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new JsonFallbackCustomer(new Address("Main St", "Springfield")) { Id = 1 });
+            context.SaveChanges();
+        }
+
+        using (var context = new JsonFallbackCustomerContext(testStore))
+        {
+            var customer = context.Set<JsonFallbackCustomer>().Single();
+
+            Assert.True(customer.ParameterlessConstructorUsed);
+            Assert.Equal("Main St", customer.Address.Street);
+            Assert.Equal("Springfield", customer.Address.City);
         }
     }
 
@@ -192,7 +247,7 @@ public class ComplexTypeConstructorBindingSqliteTest
     {
         public int Id { get; set; }
         public string Name { get; set; } = "";
-        public Address Address { get; set; } = address;
+        public Address Address { get; } = address;
     }
 
     private class Address(string street, string city)
@@ -233,6 +288,28 @@ public class ComplexTypeConstructorBindingSqliteTest
         public double Longitude { get; set; } = longitude;
     }
 
+    private class RecordStructCustomerContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder.UseSqlite(testStore.ConnectionString);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<RecordStructCustomer>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.ComplexProperty(e => e.Address);
+                });
+    }
+
+    private class RecordStructCustomer(RecordStructAddress address)
+    {
+        public int Id { get; set; }
+        public RecordStructAddress Address { get; } = address;
+    }
+
+    private readonly record struct RecordStructAddress(string Street, string City);
+
     private class OptionalCustomerContext(SqliteTestStore testStore) : DbContext
     {
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -271,5 +348,33 @@ public class ComplexTypeConstructorBindingSqliteTest
     {
         public int Id { get; set; }
         public Address Address { get; set; } = address;
+    }
+
+    private class JsonFallbackCustomerContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder.UseSqlite(testStore.ConnectionString);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<JsonFallbackCustomer>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.ParameterlessConstructorUsed);
+                    b.ComplexProperty(e => e.Address, cb => cb.ToJson());
+                });
+    }
+
+    private class JsonFallbackCustomer
+    {
+        private JsonFallbackCustomer()
+            => ParameterlessConstructorUsed = true;
+
+        public JsonFallbackCustomer(Address address)
+            => Address = address;
+
+        public int Id { get; set; }
+        public Address Address { get; set; } = null!;
+        public bool ParameterlessConstructorUsed { get; }
     }
 }

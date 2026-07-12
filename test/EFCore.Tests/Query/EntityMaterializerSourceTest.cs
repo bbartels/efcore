@@ -613,8 +613,11 @@ public class EntityMaterializerSourceTest
 
         var entityType = context.Model.FindEntityType(typeof(EntityWithOnlyComplexConstructor))!;
 
-        Assert.IsType<ComplexPropertyParameterBinding>(
+        var binding = Assert.IsType<ComplexPropertyParameterBinding>(
             ((IEntityType)entityType).ConstructorBinding!.ParameterBindings.Single());
+        Assert.Same(
+            entityType.FindComplexProperty(nameof(EntityWithOnlyComplexConstructor.Address)),
+            binding.ConsumedProperties.Single());
 
         var source = new StructuralTypeMaterializerSource(new StructuralTypeMaterializerSourceDependencies([]));
         var factory = GetMaterializer(source, entityType);
@@ -633,6 +636,9 @@ public class EntityMaterializerSourceTest
     {
         public int Id { get; set; }
         public AddressForTest Address { get; } = address;
+
+        public static EntityWithOnlyComplexConstructor Create(object[] arguments)
+            => new((AddressForTest)arguments[0]);
     }
 
     [Fact]
@@ -692,6 +698,36 @@ public class EntityMaterializerSourceTest
         Assert.Equal("Third St", entity.Address.Street);
         Assert.Equal(47.6, entity.Address.Location.Latitude);
         Assert.Equal(-122.3, entity.Address.Location.Longitude);
+    }
+
+    [Fact]
+    public void Can_create_empty_materializer_for_complex_type_with_nested_complex_property_constructor_binding()
+    {
+        using var context = new SomeEntityContext(b =>
+            b.Entity<EntityWithNestedComplexConstructor>()
+                .ComplexProperty(e => e.Address, cb => cb.ComplexProperty(a => a.Location)));
+
+        var entityType = context.Model.FindEntityType(typeof(EntityWithNestedComplexConstructor))!;
+        var complexType = entityType.FindComplexProperty(nameof(EntityWithNestedComplexConstructor.Address))!.ComplexType;
+        var source = new StructuralTypeMaterializerSource(new StructuralTypeMaterializerSourceDependencies([]));
+        var factory = source.GetEmptyMaterializer(complexType);
+
+        var address = (NestedAddress)factory(
+            new MaterializationContext(
+                CreateValueBuffer(
+                    entityType,
+                    new()
+                    {
+                        ["Id"] = 1,
+                        ["Street"] = "Third St",
+                        ["Latitude"] = 47.6,
+                        ["Longitude"] = -122.3
+                    }),
+                context));
+
+        Assert.Equal("Third St", address.Street);
+        Assert.Equal(47.6, address.Location.Latitude);
+        Assert.Equal(-122.3, address.Location.Longitude);
     }
 
     private class EntityWithNestedComplexConstructor(NestedAddress address)
@@ -763,6 +799,89 @@ public class EntityMaterializerSourceTest
             CoreStrings.ComplexPropertyConstructorBindingNotSupported(
                 nameof(EntityWithOnlyComplexConstructor), nameof(EntityWithOnlyComplexConstructor.Address)),
             Assert.Throws<InvalidOperationException>(() => GetMaterializer(source, entityType)).Message);
+    }
+
+    [Fact]
+    public void Throws_when_wrapped_complex_property_constructor_binding_cannot_be_materialized_directly()
+    {
+        using var context = new SomeEntityContext(b =>
+            b.Entity<EntityWithOnlyComplexConstructor>()
+                .ComplexProperty(e => e.Address));
+
+        var entityType = context.Model.FindEntityType(typeof(EntityWithOnlyComplexConstructor))!;
+        var source = new NonDirectReadMaterializerSource(
+            new StructuralTypeMaterializerSourceDependencies([new ObjectArrayBindingInterceptor()]));
+
+        Assert.Equal(
+            CoreStrings.ComplexPropertyConstructorBindingNotSupported(
+                nameof(EntityWithOnlyComplexConstructor), nameof(EntityWithOnlyComplexConstructor.Address)),
+            Assert.Throws<InvalidOperationException>(() => GetMaterializer(source, entityType)).Message);
+    }
+
+    [Fact]
+    public void Nullable_complex_property_is_not_discarded_when_required_property_is_under_null_nested_complex_property()
+    {
+        using var context = new SomeEntityContext(b =>
+            b.Entity<EntityWithOptionalNestedComplexConstructor>()
+                .ComplexProperty(
+                    e => e.Contact,
+                    contactBuilder =>
+                    {
+                        contactBuilder.IsRequired(false);
+                        contactBuilder.Property(c => c.Name).IsRequired(false);
+                        contactBuilder.ComplexProperty(c => c.Address).IsRequired(false);
+                    }));
+
+        var entityType = context.Model.FindEntityType(typeof(EntityWithOptionalNestedComplexConstructor))!;
+        var source = new StructuralTypeMaterializerSource(new StructuralTypeMaterializerSourceDependencies([]));
+        var factory = GetMaterializer(source, entityType);
+
+        var entity = (EntityWithOptionalNestedComplexConstructor)factory(
+            new MaterializationContext(
+                CreateValueBuffer(entityType, new() { ["Id"] = 1, ["Name"] = "Homer", ["Zip"] = null }),
+                context));
+
+        Assert.NotNull(entity.Contact);
+        Assert.Equal("Homer", entity.Contact.Name);
+        Assert.Null(entity.Contact.Address);
+    }
+
+#nullable enable
+    private class EntityWithOptionalNestedComplexConstructor(OptionalContact? contact)
+    {
+        public int Id { get; set; }
+        public OptionalContact? Contact { get; } = contact;
+    }
+
+    private class OptionalContact(string? name, OptionalAddress? address)
+    {
+        public string? Name { get; set; } = name;
+        public OptionalAddress? Address { get; set; } = address;
+    }
+
+    private class OptionalAddress(string zip)
+    {
+        public string Zip { get; set; } = zip;
+    }
+#nullable restore
+
+    private class ObjectArrayBindingInterceptor : IInstantiationBindingInterceptor
+    {
+        public InstantiationBinding ModifyBinding(
+            InstantiationBindingInterceptionData interceptionData,
+            InstantiationBinding binding)
+        {
+            if (interceptionData.TypeBase is not IEntityType)
+            {
+                return binding;
+            }
+
+            return new FactoryMethodBinding(
+                typeof(EntityWithOnlyComplexConstructor).GetMethod(
+                    nameof(EntityWithOnlyComplexConstructor.Create), [typeof(object[])])!,
+                [new ObjectArrayParameterBinding(binding.ParameterBindings)],
+                interceptionData.TypeBase.ClrType);
+        }
     }
 
     private class NonDirectReadMaterializerSource(StructuralTypeMaterializerSourceDependencies dependencies)

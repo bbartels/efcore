@@ -129,7 +129,8 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
         // Creates a conditional expression that handles materialization of nullable complex types.
         // For nullable complex types, the method checks if all scalar properties are null
         // and returns default if they are, otherwise materializes the complex type instance.
-        // If there's a required (non-nullable) property, only that property is checked for efficiency.
+        // If there's a required (non-nullable) property reached only through required complex properties,
+        // only that property is checked for efficiency.
         Expression HandleNullableComplexTypeMaterialization(
             IComplexType complexType,
             Type clrType,
@@ -139,9 +140,28 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
             // Get all scalar properties of the complex type (including nested ones).
             var allScalarProperties = complexType.GetFlattenedProperties().ToList();
 
-            var requiredProperty = allScalarProperties.Where(p => !p.IsNullable).FirstOrDefault();
+            var requiredProperty = allScalarProperties.FirstOrDefault(
+                p => !p.IsNullable && HasRequiredComplexPropertyPath(p, complexType));
+
+            static bool HasRequiredComplexPropertyPath(IProperty property, IComplexType rootComplexType)
+            {
+                var declaringType = property.DeclaringType;
+                while (declaringType is IComplexType declaringComplexType
+                       && declaringComplexType != rootComplexType)
+                {
+                    if (declaringComplexType.ComplexProperty.IsNullable)
+                    {
+                        return false;
+                    }
+
+                    declaringType = declaringComplexType.ComplexProperty.DeclaringType;
+                }
+
+                return declaringType == rootComplexType;
+            }
+
             var nullCheck = requiredProperty is not null
-                // If there's a required property, it's enough to check just that one for null.
+                // If there's a required property on a required path, it's enough to check just that one for null.
                 ? Equal(
                     getValueBufferExpression.CreateValueBufferReadValueExpression(typeof(object), requiredProperty.GetIndex(), requiredProperty),
                     Constant(null, typeof(object)))
@@ -690,12 +710,31 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
     {
         foreach (var parameterBinding in binding.ParameterBindings)
         {
-            if (parameterBinding is ComplexPropertyParameterBinding complexPropertyBinding
-                && !ReadComplexTypeDirectly(complexPropertyBinding.ComplexProperty.ComplexType))
+            ValidateComplexPropertyBinding(parameterBinding);
+        }
+
+        void ValidateComplexPropertyBinding(ParameterBinding parameterBinding)
+        {
+            switch (parameterBinding)
             {
-                throw new InvalidOperationException(
-                    CoreStrings.ComplexPropertyConstructorBindingNotSupported(
-                        structuralType.DisplayName(), complexPropertyBinding.ComplexProperty.Name));
+                case ComplexPropertyParameterBinding complexPropertyBinding:
+                    var complexProperty = (IComplexProperty)complexPropertyBinding.ConsumedProperties[0];
+                    if (!ReadComplexTypeDirectly(complexProperty.ComplexType))
+                    {
+                        throw new InvalidOperationException(
+                            CoreStrings.ComplexPropertyConstructorBindingNotSupported(
+                                structuralType.DisplayName(), complexProperty.Name));
+                    }
+
+                    break;
+
+                case ObjectArrayParameterBinding objectArrayBinding:
+                    foreach (var nestedBinding in objectArrayBinding.Bindings)
+                    {
+                        ValidateComplexPropertyBinding(nestedBinding);
+                    }
+
+                    break;
             }
         }
     }

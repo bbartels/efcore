@@ -29,14 +29,7 @@ public class ComplexPropertyParameterBinding : ParameterBinding
                     complexProperty.DeclaringType.DisplayName(), complexProperty.Name),
                 nameof(complexProperty));
         }
-
-        ComplexProperty = complexProperty;
     }
-
-    /// <summary>
-    ///     The complex property being bound.
-    /// </summary>
-    public virtual IComplexProperty ComplexProperty { get; }
 
     /// <summary>
     ///     Creates an expression tree representing the binding of the value of a complex property from a
@@ -46,16 +39,18 @@ public class ComplexPropertyParameterBinding : ParameterBinding
     /// <returns>The expression tree.</returns>
     public override Expression BindToParameter(ParameterBindingInfo bindingInfo)
     {
+        var complexProperty = (IComplexProperty)ConsumedProperties[0];
+
         Check.DebugAssert(
             bindingInfo.MaterializerSource != null,
             "MaterializerSource must be set on ParameterBindingInfo to bind complex property constructor parameters.");
 
         return bindingInfo.MaterializerSource.CreateMaterializeExpression(
             new StructuralTypeMaterializerSourceParameters(
-                ComplexProperty.ComplexType,
+                complexProperty.ComplexType,
                 "complexType",
-                ComplexProperty.ClrType,
-                ComplexProperty.IsNullable,
+                complexProperty.ClrType,
+                complexProperty.IsNullable,
                 QueryTrackingBehavior: null),
             bindingInfo.MaterializationContextExpression);
     }

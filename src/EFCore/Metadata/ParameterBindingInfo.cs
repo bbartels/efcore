@@ -51,7 +51,7 @@ public readonly struct ParameterBindingInfo
     /// <param name="materializerSourceParameters">Parameters for the materialization that is happening.</param>
     /// <param name="materializationContextExpression">The expression tree from which the parameter value will come.</param>
     /// <param name="materializerSource">The materializer source used to generate expressions for nested complex type bindings.</param>
-    public ParameterBindingInfo(
+    internal ParameterBindingInfo(
         StructuralTypeMaterializerSourceParameters materializerSourceParameters,
         Expression materializationContextExpression,
         IStructuralTypeMaterializerSource? materializerSource)
@@ -87,7 +87,7 @@ public readonly struct ParameterBindingInfo
     ///     The materializer source used for generating expressions when binding complex property parameters.
     ///     Set when materializing types that may have complex property constructor parameters.
     /// </summary>
-    public IStructuralTypeMaterializerSource? MaterializerSource { get; }
+    internal IStructuralTypeMaterializerSource? MaterializerSource { get; }
 
     /// <summary>
     ///     Expressions holding initialized instances for service properties.
