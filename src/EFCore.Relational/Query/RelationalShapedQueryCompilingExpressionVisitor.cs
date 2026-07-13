@@ -500,25 +500,6 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor : ShapedQue
         ParameterExpression instanceVariable,
         List<ParameterExpression> variables,
         List<Expression> expressions)
-        => AddStructuralTypeInitialization(
-            shaper,
-            instanceVariable,
-            variables,
-            expressions,
-            shaper.StructuralType.ConstructorBinding?.ParameterBindings
-                .SelectMany(p => p.ConsumedProperties)
-                .OfType<IComplexProperty>()
-                .Where(p => p.IsCollection)
-                .ToHashSet()
-            ?? []);
-
-    /// <inheritdoc />
-    public override void AddStructuralTypeInitialization(
-        StructuralTypeShaperExpression shaper,
-        ParameterExpression instanceVariable,
-        List<ParameterExpression> variables,
-        List<Expression> expressions,
-        IReadOnlySet<IComplexProperty> constructorConsumedComplexCollections)
     {
         Check.DebugAssert(_currentShaperProcessor is not null);
 
@@ -526,7 +507,7 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor : ShapedQue
             shaper,
             instanceVariable,
             expressions,
-            constructorConsumedComplexCollections);
+            ConstructorConsumedComplexCollections);
     }
 
     private Expression CreateRelationalCommandResolverExpression(Expression queryExpression)

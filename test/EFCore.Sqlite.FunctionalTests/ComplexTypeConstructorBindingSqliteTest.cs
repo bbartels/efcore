@@ -430,6 +430,43 @@ public class ComplexTypeConstructorBindingSqliteTest
         }
     }
 
+    [Fact]
+    public async Task Replacement_interceptor_consumption_is_scoped_to_the_selected_concrete_type()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCollectionCtorBindingDivergentSubtypes");
+
+        using (var context = new DivergentCustomerContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.AddRange(
+                new ConstructorCollectionCustomer
+                {
+                    Id = 1,
+                    Addresses = [new InterceptedAddress("Constructor St", "Springfield")]
+                },
+                new ProviderCollectionCustomer
+                {
+                    Id = 2,
+                    Addresses = [new InterceptedAddress("Provider St", "Springfield")]
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new DivergentCustomerContext(testStore))
+        {
+            var customers = context.Set<DivergentCustomer>().OrderBy(e => e.Id).ToList();
+
+            var constructorCustomer = Assert.IsType<ConstructorCollectionCustomer>(customers[0]);
+            Assert.True(constructorCustomer.FactoryUsed);
+            Assert.Equal(1, constructorCustomer.AddressAssignmentCount);
+            Assert.Equal("Constructor St", Assert.Single(constructorCustomer.Addresses).Street);
+
+            var providerCustomer = Assert.IsType<ProviderCollectionCustomer>(customers[1]);
+            Assert.Equal("Provider St", Assert.Single(providerCustomer.Addresses).Street);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -808,6 +845,72 @@ public class ComplexTypeConstructorBindingSqliteTest
     {
         public string Street { get; set; } = street;
         public string City { get; set; } = city;
+    }
+
+    private class DivergentCustomerContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder
+                .UseSqlite(testStore.ConnectionString)
+                .AddInterceptors(DivergentCollectionBindingInterceptor.Instance);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<DivergentCustomer>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.FactoryUsed);
+                    b.Ignore(e => e.AddressAssignmentCount);
+                    b.HasDiscriminator<string>("CustomerType")
+                        .HasValue<ConstructorCollectionCustomer>("Constructor")
+                        .HasValue<ProviderCollectionCustomer>("Provider");
+                    b.ComplexCollection(e => e.Addresses, cb => cb.ToJson());
+                });
+    }
+
+    private abstract class DivergentCustomer
+    {
+        private List<InterceptedAddress> _addresses = [];
+
+        public int Id { get; set; }
+        public List<InterceptedAddress> Addresses
+        {
+            get => _addresses;
+            set
+            {
+                _addresses = value;
+                AddressAssignmentCount++;
+            }
+        }
+
+        public bool FactoryUsed { get; protected set; }
+        public int AddressAssignmentCount { get; private set; }
+    }
+
+    private class ConstructorCollectionCustomer : DivergentCustomer
+    {
+        public static ConstructorCollectionCustomer Create(List<InterceptedAddress> addresses)
+            => new() { Addresses = addresses, FactoryUsed = true };
+    }
+
+    private class ProviderCollectionCustomer : DivergentCustomer;
+
+    private sealed class DivergentCollectionBindingInterceptor : IInstantiationBindingInterceptor
+    {
+        public static readonly DivergentCollectionBindingInterceptor Instance = new();
+
+        public InstantiationBinding ModifyBinding(
+            InstantiationBindingInterceptionData interceptionData,
+            InstantiationBinding binding)
+            => interceptionData.TypeBase.ClrType == typeof(ConstructorCollectionCustomer)
+                ? new FactoryMethodBinding(
+                    typeof(ConstructorCollectionCustomer).GetMethod(nameof(ConstructorCollectionCustomer.Create))!,
+                    [
+                        new ComplexPropertyParameterBinding(
+                            interceptionData.TypeBase.FindComplexProperty(nameof(DivergentCustomer.Addresses))!)
+                    ],
+                    typeof(ConstructorCollectionCustomer))
+                : binding;
     }
 
     private class CustomerWithNullableAddressCollectionContext(SqliteTestStore testStore) : DbContext

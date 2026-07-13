@@ -186,7 +186,7 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
         private readonly Dictionary<ParameterExpression, ParameterExpression>
             _jsonReaderDataToJsonReaderManagerParameterMapping = new();
 
-        private readonly Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>>
+        private readonly Dictionary<ITypeBase, IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>>>
             _constructorConsumedComplexCollections = new();
 
         /// <summary>
@@ -1634,7 +1634,8 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
             var structuralTypeShaperMaterializer =
                 (BlockExpression)_parentVisitor.InjectStructuralTypeMaterializers(structuralTypeShaperExpression);
             var constructorConsumedComplexCollections = _constructorConsumedComplexCollections.GetValueOrDefault(structuralType)
-                ?? (IReadOnlySet<IComplexProperty>)new HashSet<IComplexProperty>();
+                ?? (IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>>)
+                    new Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>>();
 
             var innerShapersMap = new Dictionary<string, Expression>();
             var innerFixupMap = new Dictionary<string, LambdaExpression>();
@@ -1685,14 +1686,22 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
                 var navigationJsonPropertyName = relatedStructuralType.GetJsonPropertyName()!;
                 innerShapersMap[navigationJsonPropertyName] = innerShaper;
 
-                var isConsumedByConstructor = nestedStructuralProperty is IComplexProperty complexProperty
-                    && constructorConsumedComplexCollections.Contains(complexProperty);
+                var isConsumedByAllConstructors = nestedStructuralProperty is IComplexProperty { IsCollection: true } complexProperty
+                    && IsComplexCollectionConsumedByAllConstructors(
+                        complexProperty,
+                        constructorConsumedComplexCollections);
 
                 if (nestedStructuralProperty.IsCollection)
                 {
                     var shaperEntityParameter = Parameter(structuralType.ClrType);
                     var ownedNavigationType = nestedStructuralProperty.GetMemberInfo(forMaterialization: true, forSet: true).GetMemberType();
                     var shaperCollectionParameter = Parameter(ownedNavigationType);
+                    var shouldPopulateComplexCollection = nestedStructuralProperty is IComplexProperty nestedComplexCollection
+                        ? CreateComplexCollectionPopulationCondition(
+                            shaperEntityParameter,
+                            nestedComplexCollection,
+                            constructorConsumedComplexCollections)
+                        : Constant(true);
                     var expressions = new List<Expression>();
                     var expressionsForTracking = new List<Expression>();
 
@@ -1745,9 +1754,15 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
                         shaperEntityParameter,
                         shaperCollectionParameter);
 
-                    if (!isConsumedByConstructor)
+                    if (!isConsumedByAllConstructors)
                     {
-                        innerFixupMap[navigationJsonPropertyName] = fixup;
+                        innerFixupMap[navigationJsonPropertyName] =
+                            shouldPopulateComplexCollection is ConstantExpression { Value: true }
+                                ? fixup
+                                : Lambda(
+                                    IfThen(shouldPopulateComplexCollection, fixup.Body),
+                                    shaperEntityParameter,
+                                    shaperCollectionParameter);
                     }
 
                     var trackedFixup = Lambda(
@@ -1757,9 +1772,16 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
 
                     // With tracking queries, the change tracker performs entity fixup, so we only need to handle fixup in the shaper for
                     // non-tracking queries; however, complex types always need to be fixed up in the shaper.
-                    if (!isConsumedByConstructor)
+                    if (!isConsumedByAllConstructors)
                     {
-                        trackingInnerFixupMap[navigationJsonPropertyName] = relatedStructuralType is IComplexType ? fixup : trackedFixup;
+                        var selectedTrackedFixup = relatedStructuralType is IComplexType ? fixup : trackedFixup;
+                        trackingInnerFixupMap[navigationJsonPropertyName] =
+                            shouldPopulateComplexCollection is ConstantExpression { Value: true }
+                                ? selectedTrackedFixup
+                                : Lambda(
+                                    IfThen(shouldPopulateComplexCollection, selectedTrackedFixup.Body),
+                                    shaperEntityParameter,
+                                    shaperCollectionParameter);
                     }
                 }
                 else
@@ -1938,7 +1960,7 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
             IDictionary<string, Expression> innerShapersMap,
             IDictionary<string, LambdaExpression> innerFixupMap,
             IDictionary<string, LambdaExpression> trackingInnerFixupMap,
-            IReadOnlySet<IComplexProperty> constructorConsumedComplexCollections)
+            IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
             : ExpressionVisitor
         {
             private static readonly PropertyInfo JsonEncodedTextEncodedUtf8BytesProperty
@@ -2094,9 +2116,12 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
                     var propertyAssignmentReplacer = new ValueBufferTryReadValueMethodsReplacer(
                         jsonStructuralTypeVariable,
                         propertyAssignmentMap,
-                        constructorConsumedComplexCollections.ToDictionary(
-                            p => p,
-                            p => _navigationVariableMap[p.ComplexType.GetJsonPropertyName()!]));
+                        constructorConsumedComplexCollections.Values
+                            .SelectMany(p => p)
+                            .Distinct()
+                            .ToDictionary(
+                                p => p,
+                                p => _navigationVariableMap[p.ComplexType.GetJsonPropertyName()!]));
 
                     if (body.Expressions[0] is BinaryExpression
                         {
@@ -2583,6 +2608,50 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
             }
         }
 
+        private static bool IsComplexCollectionConsumedByAllConstructors(
+            IComplexProperty complexProperty,
+            IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
+        {
+            var applicableBindings = constructorConsumedComplexCollections
+                .Where(kvp => complexProperty.DeclaringType.IsAssignableFrom(kvp.Key))
+                .ToList();
+
+            return applicableBindings.Count > 0
+                && applicableBindings.All(kvp => kvp.Value.Contains(complexProperty));
+        }
+
+        private static Expression CreateComplexCollectionPopulationCondition(
+            Expression instanceExpression,
+            IComplexProperty complexProperty,
+            IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
+        {
+            var applicableTypes = constructorConsumedComplexCollections.Keys
+                .Where(complexProperty.DeclaringType.IsAssignableFrom)
+                .ToList();
+            var nonConsumingTypes = applicableTypes
+                .Where(t => !constructorConsumedComplexCollections[t].Contains(complexProperty))
+                .ToList();
+
+            if (nonConsumingTypes.Count == applicableTypes.Count)
+            {
+                return Constant(true);
+            }
+
+            if (nonConsumingTypes.Count == 0)
+            {
+                return Constant(false);
+            }
+
+            return nonConsumingTypes
+                .Select(
+                    type => applicableTypes
+                        .Where(derivedType => derivedType != type && type.IsAssignableFrom(derivedType))
+                        .Select(derivedType => (Expression)Not(TypeIs(instanceExpression, derivedType.ClrType)))
+                        .Prepend(TypeIs(instanceExpression, type.ClrType))
+                        .Aggregate(AndAlso))
+                .Aggregate(OrElse);
+        }
+
         /// <summary>
         ///     Injects JSON shaper code for JSON-mapped complex properties.
         /// </summary>
@@ -2590,7 +2659,7 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
             StructuralTypeShaperExpression shaper,
             ParameterExpression instanceVariable,
             List<Expression> expressions,
-            IReadOnlySet<IComplexProperty> constructorConsumedComplexCollections)
+            IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
         {
             _constructorConsumedComplexCollections[shaper.StructuralType] = constructorConsumedComplexCollections;
 
@@ -2605,9 +2674,19 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
                 foreach (var (property, projectionIndex) in propertyMap)
                 {
                     if (property is IComplexProperty { ComplexType: var complexType } complexProperty
-                        && complexType.IsMappedToJson()
-                        && !constructorConsumedComplexCollections.Contains(complexProperty))
+                        && complexType.IsMappedToJson())
                     {
+                        var shouldPopulateComplexCollection = complexProperty.IsCollection
+                            ? CreateComplexCollectionPopulationCondition(
+                                instanceVariable,
+                                complexProperty,
+                                constructorConsumedComplexCollections)
+                            : Constant(true);
+                        if (shouldPopulateComplexCollection is ConstantExpression { Value: false })
+                        {
+                            continue;
+                        }
+
                         var jsonReaderDataVariable = GenerateJsonReader(projectionIndex, complexType);
 
                         var shaperResult = CreateJsonShapers(
@@ -2620,7 +2699,10 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
                             structuralProperty: complexProperty);
 
                         var visitedShaperResult = Visit(shaperResult);
-                        expressions.Add(visitedShaperResult);
+                        expressions.Add(
+                            shouldPopulateComplexCollection is ConstantExpression { Value: true }
+                                ? visitedShaperResult
+                                : IfThen(shouldPopulateComplexCollection, visitedShaperResult));
                     }
                 }
             }

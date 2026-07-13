@@ -81,6 +81,15 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
     /// </summary>
     protected virtual ShapedQueryCompilingExpressionVisitorDependencies Dependencies { get; }
 
+    private IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> _constructorConsumedComplexCollections
+        = new Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>>();
+
+    /// <summary>
+    ///     Complex collection properties consumed by the interceptor-modified constructor binding for each concrete structural type.
+    /// </summary>
+    protected virtual IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> ConstructorConsumedComplexCollections
+        => _constructorConsumedComplexCollections;
+
     /// <summary>
     ///     The query compilation context object for current compilation.
     /// </summary>
@@ -387,8 +396,20 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
         ParameterExpression instanceVariable,
         List<ParameterExpression> variables,
         List<Expression> expressions,
-        IReadOnlySet<IComplexProperty> constructorConsumedComplexCollections)
-        => AddStructuralTypeInitialization(shaper, instanceVariable, variables, expressions);
+        IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
+    {
+        var previousConstructorConsumedComplexCollections = _constructorConsumedComplexCollections;
+        _constructorConsumedComplexCollections = constructorConsumedComplexCollections;
+        try
+        {
+            // Deliberately dispatch through the legacy hook so provider subclasses overriding it continue to participate.
+            AddStructuralTypeInitialization(shaper, instanceVariable, variables, expressions);
+        }
+        finally
+        {
+            _constructorConsumedComplexCollections = previousConstructorConsumedComplexCollections;
+        }
+    }
 
     private sealed class StructuralTypeMaterializerInjector(
         ShapedQueryCompilingExpressionVisitor shapedQueryCompiler,
@@ -668,7 +689,8 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
                 : (null, [structuralType]);
 
             var switchCases = new SwitchCase[concreteStructuralTypes.Length];
-            var constructorConsumedComplexCollections = new HashSet<IComplexProperty>();
+            var constructorConsumedComplexCollections =
+                new Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>>();
             for (var i = 0; i < concreteStructuralTypes.Length; i++)
             {
                 var concreteStructuralType = concreteStructuralTypes[i];
@@ -739,7 +761,7 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
                 ParameterExpression MaterializationContextVariable,
                 ParameterExpression ConcreteEntityTypeVariable,
                 ParameterExpression ShadowValuesVariable) materializeExpressionContext,
-            HashSet<IComplexProperty> constructorConsumedComplexCollections)
+            Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
         {
             var (returnType,
                 nullable,
@@ -756,9 +778,13 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
 
             if (materializer is StructuralTypeMaterializationExpression structuralTypeMaterializationExpression)
             {
-                constructorConsumedComplexCollections.UnionWith(
-                    structuralTypeMaterializationExpression.ConstructorConsumedComplexCollections);
+                constructorConsumedComplexCollections[concreteStructuralType]
+                    = structuralTypeMaterializationExpression.ConstructorConsumedComplexCollections;
                 materializer = structuralTypeMaterializationExpression.MaterializationExpression;
+            }
+            else
+            {
+                constructorConsumedComplexCollections[concreteStructuralType] = new HashSet<IComplexProperty>();
             }
 
             if (_queryStateManager

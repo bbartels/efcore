@@ -897,6 +897,44 @@ public class EntityMaterializerSourceTest
     }
 #nullable restore
 
+    [Fact]
+    public void Collection_consumption_hook_dispatches_through_legacy_provider_override()
+    {
+        var visitor = (LegacyStructuralTypeInitializationVisitor)
+            System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(
+                typeof(LegacyStructuralTypeInitializationVisitor));
+
+        visitor.AddStructuralTypeInitialization(
+            shaper: null!,
+            instanceVariable: null!,
+            variables: [],
+            expressions: [],
+            constructorConsumedComplexCollections:
+                new Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>>());
+
+        Assert.True(visitor.LegacyHookCalled);
+    }
+
+    private sealed class LegacyStructuralTypeInitializationVisitor : ShapedQueryCompilingExpressionVisitor
+    {
+        private LegacyStructuralTypeInitializationVisitor()
+            : base(null!, null!)
+        {
+        }
+
+        public bool LegacyHookCalled { get; private set; }
+
+        public override void AddStructuralTypeInitialization(
+            StructuralTypeShaperExpression shaper,
+            ParameterExpression instanceVariable,
+            List<ParameterExpression> variables,
+            List<Expression> expressions)
+            => LegacyHookCalled = true;
+
+        protected override Expression VisitShapedQuery(ShapedQueryExpression shapedQueryExpression)
+            => throw new NotSupportedException();
+    }
+
     private class ObjectArrayBindingInterceptor : IInstantiationBindingInterceptor
     {
         public InstantiationBinding ModifyBinding(

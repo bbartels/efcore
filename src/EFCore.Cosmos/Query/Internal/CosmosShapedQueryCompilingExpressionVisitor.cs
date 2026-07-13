@@ -185,38 +185,69 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
         ParameterExpression instanceVariable,
         List<ParameterExpression> variables,
         List<Expression> expressions)
-        => AddStructuralTypeInitialization(
-            shaper,
-            instanceVariable,
-            variables,
-            expressions,
-            shaper.StructuralType.ConstructorBinding?.ParameterBindings
-                .SelectMany(p => p.ConsumedProperties)
-                .OfType<IComplexProperty>()
-                .Where(p => p.IsCollection)
-                .ToHashSet()
-            ?? []);
-
-    /// <inheritdoc />
-    public override void AddStructuralTypeInitialization(
-        StructuralTypeShaperExpression shaper,
-        ParameterExpression instanceVariable,
-        List<ParameterExpression> variables,
-        List<Expression> expressions,
-        IReadOnlySet<IComplexProperty> constructorConsumedComplexCollections)
     {
         foreach (var complexProperty in shaper.StructuralType.GetComplexProperties())
         {
-            if (constructorConsumedComplexCollections.Contains(complexProperty))
+            var initializationExpression = complexProperty.IsCollection
+                ? CreateComplexCollectionAssignmentBlock(
+                    MakeMemberAccess(instanceVariable, complexProperty.GetMemberInfo(true, true)),
+                    complexProperty)
+                : CreateComplexPropertyAssignmentBlock(
+                    MakeMemberAccess(instanceVariable, complexProperty.GetMemberInfo(true, true)),
+                    complexProperty);
+
+            if (!complexProperty.IsCollection)
+            {
+                expressions.Add(initializationExpression);
+                continue;
+            }
+
+            var shouldPopulateComplexCollection = CreateComplexCollectionPopulationCondition(
+                instanceVariable,
+                complexProperty,
+                ConstructorConsumedComplexCollections);
+            if (shouldPopulateComplexCollection is ConstantExpression { Value: false })
             {
                 continue;
             }
 
-            var member = MakeMemberAccess(instanceVariable, complexProperty.GetMemberInfo(true, true));
-            expressions.Add(complexProperty.IsCollection
-                ? CreateComplexCollectionAssignmentBlock(member, complexProperty)
-                : CreateComplexPropertyAssignmentBlock(member, complexProperty));
+            expressions.Add(
+                shouldPopulateComplexCollection is ConstantExpression { Value: true }
+                    ? initializationExpression
+                    : IfThen(shouldPopulateComplexCollection, initializationExpression));
         }
+    }
+
+    private static Expression CreateComplexCollectionPopulationCondition(
+        Expression instanceExpression,
+        IComplexProperty complexProperty,
+        IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
+    {
+        var applicableTypes = constructorConsumedComplexCollections.Keys
+            .Where(complexProperty.DeclaringType.IsAssignableFrom)
+            .ToList();
+        var nonConsumingTypes = applicableTypes
+            .Where(t => !constructorConsumedComplexCollections[t].Contains(complexProperty))
+            .ToList();
+
+        if (nonConsumingTypes.Count == applicableTypes.Count)
+        {
+            return Constant(true);
+        }
+
+        if (nonConsumingTypes.Count == 0)
+        {
+            return Constant(false);
+        }
+
+        return nonConsumingTypes
+            .Select(
+                type => applicableTypes
+                    .Where(derivedType => derivedType != type && type.IsAssignableFrom(derivedType))
+                    .Select(derivedType => (Expression)Not(TypeIs(instanceExpression, derivedType.ClrType)))
+                    .Prepend(TypeIs(instanceExpression, type.ClrType))
+                    .Aggregate(AndAlso))
+            .Aggregate(OrElse);
     }
 
     private BlockExpression CreateComplexPropertyAssignmentBlock(MemberExpression memberExpression, IComplexProperty complexProperty)
