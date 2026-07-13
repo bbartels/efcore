@@ -229,6 +229,305 @@ public class ComplexTypeConstructorBindingSqliteTest
         }
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Complex_collection_is_injected_into_get_only_constructor_property_when_querying(
+        bool noTracking,
+        bool empty)
+    {
+        await using var testStore = SqliteTestStore.Create($"ComplexCollectionCtorBindingQuery{noTracking}{empty}");
+
+        using (var context = new CustomerWithAddressCollectionContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new CustomerWithAddressCollection(
+                    empty
+                        ? []
+                        :
+                        [
+                            new Address("Main St", "Springfield"),
+                            new Address("Evergreen Terrace", "Springfield")
+                        ])
+                {
+                    Id = 1
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new CustomerWithAddressCollectionContext(testStore))
+        {
+            var entityType = context.Model.FindEntityType(typeof(CustomerWithAddressCollection))!;
+            var binding = Assert.IsType<ComplexPropertyParameterBinding>(
+                ((IEntityType)entityType).ConstructorBinding!.ParameterBindings.Single());
+            Assert.Same(
+                entityType.FindComplexProperty(nameof(CustomerWithAddressCollection.Addresses)),
+                binding.ConsumedProperties.Single());
+
+            var query = context.Set<CustomerWithAddressCollection>().AsQueryable();
+            var customer = (noTracking ? query.AsNoTracking() : query).Single();
+
+            Assert.Equal(1, customer.Id);
+            Assert.Equal(empty ? 0 : 2, customer.ConstructorAddressCount);
+            Assert.Equal(
+                empty ? [] : ["Main St", "Evergreen Terrace"],
+                customer.ConstructorAddressSnapshot);
+            if (empty)
+            {
+                Assert.Empty(customer.Addresses);
+            }
+            else
+            {
+                Assert.Collection(
+                    customer.Addresses,
+                    address =>
+                    {
+                        Assert.Equal("Main St", address.Street);
+                        Assert.Equal("Springfield", address.City);
+                    },
+                    address =>
+                    {
+                        Assert.Equal("Evergreen Terrace", address.Street);
+                        Assert.Equal("Springfield", address.City);
+                    });
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Complex_collection_injected_through_constructor_is_tracked_and_updated()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCollectionCtorBindingTracking");
+
+        using (var context = new CustomerWithAddressCollectionContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new CustomerWithAddressCollection(
+                    [
+                        new Address("Main St", "Springfield"),
+                        new Address("Evergreen Terrace", "Springfield")
+                    ])
+                {
+                    Id = 1
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new CustomerWithAddressCollectionContext(testStore))
+        {
+            var customer = context.Set<CustomerWithAddressCollection>().Single();
+            var collectionEntry = context.Entry(customer).ComplexCollection(nameof(CustomerWithAddressCollection.Addresses));
+
+            Assert.Equal("Main St", collectionEntry[0].Property(nameof(Address.Street)).OriginalValue);
+            Assert.Equal("Evergreen Terrace", collectionEntry[1].Property(nameof(Address.Street)).OriginalValue);
+
+            customer.Addresses.Reverse();
+            customer.Addresses[0].Street = "Changed Terrace";
+
+            context.ChangeTracker.DetectChanges();
+
+            Assert.True(collectionEntry.IsModified);
+            Assert.Equal(1, context.SaveChanges());
+        }
+
+        using (var context = new CustomerWithAddressCollectionContext(testStore))
+        {
+            var customer = context.Set<CustomerWithAddressCollection>().AsNoTracking().Single();
+
+            Assert.Collection(
+                customer.Addresses,
+                address => Assert.Equal("Changed Terrace", address.Street),
+                address => Assert.Equal("Main St", address.Street));
+        }
+    }
+
+    [Fact]
+    public async Task Complex_collection_is_injected_through_proxy_constructor_binding()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCollectionCtorBindingProxy");
+
+        using (var context = new ProxiedCustomerWithAddressCollectionContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new ProxiedCustomerWithAddressCollection(
+                    [new ProxyAddress("Main St", "Springfield")])
+                {
+                    Id = 1
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new ProxiedCustomerWithAddressCollectionContext(testStore))
+        {
+            var customer = context.Set<ProxiedCustomerWithAddressCollection>().Single();
+
+            Assert.NotEqual(typeof(ProxiedCustomerWithAddressCollection), customer.GetType());
+            Assert.Equal(1, customer.ConstructorAddressCount);
+            Assert.Equal("Main St", Assert.Single(customer.Addresses).Street);
+        }
+    }
+
+    [Fact]
+    public async Task Replacement_interceptor_removing_collection_binding_keeps_provider_population()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCollectionCtorBindingInterceptorRemoves");
+
+        using (var context = new InterceptedCustomerContext(testStore, RemoveCollectionBindingInterceptor.Instance))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new InterceptedCustomer(
+                    [new InterceptedAddress("Main St", "Springfield")])
+                {
+                    Id = 1
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new InterceptedCustomerContext(testStore, RemoveCollectionBindingInterceptor.Instance))
+        {
+            var customer = context.Set<InterceptedCustomer>().Single();
+
+            Assert.True(customer.FactoryUsed);
+            Assert.Equal("Main St", Assert.Single(customer.Addresses).Street);
+        }
+    }
+
+    [Fact]
+    public async Task Replacement_interceptor_introducing_collection_binding_avoids_duplicate_provider_population()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCollectionCtorBindingInterceptorIntroduces");
+
+        using (var context = new InterceptorIntroducedCustomerContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new InterceptorIntroducedCustomer
+                {
+                    Id = 1,
+                    Addresses = [new InterceptedAddress("Main St", "Springfield")]
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new InterceptorIntroducedCustomerContext(testStore))
+        {
+            var customer = context.Set<InterceptorIntroducedCustomer>().Single();
+
+            Assert.True(customer.FactoryUsed);
+            Assert.Equal(1, customer.AddressAssignmentCount);
+            Assert.Equal("Main St", Assert.Single(customer.Addresses).Street);
+        }
+    }
+
+    [Fact]
+    public async Task Replacement_interceptor_consumption_is_scoped_to_the_selected_concrete_type()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCollectionCtorBindingDivergentSubtypes");
+
+        using (var context = new DivergentCustomerContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.AddRange(
+                new ConstructorCollectionCustomer
+                {
+                    Id = 1,
+                    Addresses = [new InterceptedAddress("Constructor St", "Springfield")]
+                },
+                new ProviderCollectionCustomer
+                {
+                    Id = 2,
+                    Addresses = [new InterceptedAddress("Provider St", "Springfield")]
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new DivergentCustomerContext(testStore))
+        {
+            var customers = context.Set<DivergentCustomer>().OrderBy(e => e.Id).ToList();
+
+            var constructorCustomer = Assert.IsType<ConstructorCollectionCustomer>(customers[0]);
+            Assert.True(constructorCustomer.FactoryUsed);
+            Assert.Equal(1, constructorCustomer.AddressAssignmentCount);
+            Assert.Equal("Constructor St", Assert.Single(constructorCustomer.Addresses).Street);
+
+            var providerCustomer = Assert.IsType<ProviderCollectionCustomer>(customers[1]);
+            Assert.Equal("Provider St", Assert.Single(providerCustomer.Addresses).Street);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Null_complex_collection_is_injected_as_null_when_querying(bool noTracking)
+    {
+        await using var testStore = SqliteTestStore.Create($"NullComplexCollectionCtorBindingQuery{noTracking}");
+
+        using (var context = new CustomerWithNullableAddressCollectionContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(new CustomerWithNullableAddressCollection(null) { Id = 1 });
+            context.SaveChanges();
+        }
+
+        using (var context = new CustomerWithNullableAddressCollectionContext(testStore))
+        {
+            var query = context.Set<CustomerWithNullableAddressCollection>().AsQueryable();
+            var customer = (noTracking ? query.AsNoTracking() : query).Single();
+
+            Assert.True(customer.ConstructorReceivedNull);
+            Assert.Null(customer.Addresses);
+        }
+    }
+
+    [Fact]
+    public async Task Nested_complex_collection_is_injected_into_complex_type_constructor_when_querying()
+    {
+        await using var testStore = SqliteTestStore.Create("NestedComplexCollectionCtorBindingQuery");
+
+        using (var context = new CustomerWithProfileContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new CustomerWithProfile
+                {
+                    Id = 1,
+                    Profile = new Profile(
+                        "Primary",
+                        [
+                            new Address("Main St", "Springfield"),
+                            new Address("Evergreen Terrace", "Springfield")
+                        ])
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new CustomerWithProfileContext(testStore))
+        {
+            var customer = context.Set<CustomerWithProfile>().Single();
+
+            Assert.Equal("Primary", customer.Profile.Name);
+            Assert.Equal(2, customer.Profile.ConstructorAddressCount);
+            Assert.Collection(
+                customer.Profile.Addresses,
+                address => Assert.Equal("Main St", address.Street),
+                address => Assert.Equal("Evergreen Terrace", address.Street));
+        }
+    }
+
     private class CustomerContext(SqliteTestStore testStore) : DbContext
     {
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -376,5 +675,298 @@ public class ComplexTypeConstructorBindingSqliteTest
         public int Id { get; set; }
         public Address Address { get; set; } = null!;
         public bool ParameterlessConstructorUsed { get; }
+    }
+
+    private class CustomerWithAddressCollectionContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder.UseSqlite(testStore.ConnectionString);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<CustomerWithAddressCollection>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.ConstructorAddressCount);
+                    b.Ignore(e => e.ConstructorAddressSnapshot);
+                    b.ComplexCollection(e => e.Addresses, cb => cb.ToJson());
+                });
+    }
+
+    private class CustomerWithAddressCollection(List<Address> addresses)
+    {
+        public int Id { get; set; }
+        public List<Address> Addresses { get; } = addresses;
+        public int ConstructorAddressCount { get; } = addresses.Count;
+        public string[] ConstructorAddressSnapshot { get; } = addresses.Select(a => a.Street).ToArray();
+    }
+
+    private class ProxiedCustomerWithAddressCollectionContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder
+                .UseLazyLoadingProxies()
+                .UseSqlite(testStore.ConnectionString);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<ProxiedCustomerWithAddressCollection>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.ConstructorAddressCount);
+                    b.ComplexCollection(e => e.Addresses, cb => cb.ToJson());
+                });
+    }
+
+    public class ProxiedCustomerWithAddressCollection
+    {
+        public ProxiedCustomerWithAddressCollection(List<ProxyAddress> addresses)
+        {
+            Addresses = addresses;
+            ConstructorAddressCount = addresses.Count;
+        }
+
+        public virtual int Id { get; set; }
+        public virtual List<ProxyAddress> Addresses { get; }
+        public int ConstructorAddressCount { get; }
+    }
+
+    public class ProxyAddress(string street, string city)
+    {
+        public string Street { get; set; } = street;
+        public string City { get; set; } = city;
+    }
+
+    private class InterceptedCustomerContext(
+        SqliteTestStore testStore,
+        IInstantiationBindingInterceptor interceptor) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder
+                .UseSqlite(testStore.ConnectionString)
+                .AddInterceptors(interceptor);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<InterceptedCustomer>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.FactoryUsed);
+                    b.ComplexCollection(e => e.Addresses, cb => cb.ToJson());
+                });
+    }
+
+    private class InterceptedCustomer(List<InterceptedAddress> addresses)
+    {
+        public int Id { get; set; }
+        public List<InterceptedAddress> Addresses { get; set; } = addresses;
+        public bool FactoryUsed { get; private set; }
+
+        public static InterceptedCustomer Create()
+            => new([]) { FactoryUsed = true };
+    }
+
+    private sealed class RemoveCollectionBindingInterceptor : IInstantiationBindingInterceptor
+    {
+        public static readonly RemoveCollectionBindingInterceptor Instance = new();
+
+        public InstantiationBinding ModifyBinding(
+            InstantiationBindingInterceptionData interceptionData,
+            InstantiationBinding binding)
+            => interceptionData.TypeBase.ClrType == typeof(InterceptedCustomer)
+                ? new FactoryMethodBinding(
+                    typeof(InterceptedCustomer).GetMethod(nameof(InterceptedCustomer.Create))!,
+                    [],
+                    typeof(InterceptedCustomer))
+                : binding;
+    }
+
+    private class InterceptorIntroducedCustomerContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder
+                .UseSqlite(testStore.ConnectionString)
+                .AddInterceptors(IntroduceCollectionBindingInterceptor.Instance);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<InterceptorIntroducedCustomer>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.FactoryUsed);
+                    b.Ignore(e => e.AddressAssignmentCount);
+                    b.ComplexCollection(e => e.Addresses, cb => cb.ToJson());
+                });
+    }
+
+    private class InterceptorIntroducedCustomer
+    {
+        private List<InterceptedAddress> _addresses = [];
+
+        public int Id { get; set; }
+
+        public List<InterceptedAddress> Addresses
+        {
+            get => _addresses;
+            set
+            {
+                _addresses = value;
+                AddressAssignmentCount++;
+            }
+        }
+
+        public bool FactoryUsed { get; private set; }
+        public int AddressAssignmentCount { get; private set; }
+
+        public static InterceptorIntroducedCustomer Create(List<InterceptedAddress> addresses)
+            => new() { Addresses = addresses, FactoryUsed = true };
+    }
+
+    private sealed class IntroduceCollectionBindingInterceptor : IInstantiationBindingInterceptor
+    {
+        public static readonly IntroduceCollectionBindingInterceptor Instance = new();
+
+        public InstantiationBinding ModifyBinding(
+            InstantiationBindingInterceptionData interceptionData,
+            InstantiationBinding binding)
+            => interceptionData.TypeBase.ClrType == typeof(InterceptorIntroducedCustomer)
+                ? new FactoryMethodBinding(
+                    typeof(InterceptorIntroducedCustomer).GetMethod(nameof(InterceptorIntroducedCustomer.Create))!,
+                    [
+                        new ComplexPropertyParameterBinding(
+                            interceptionData.TypeBase.FindComplexProperty(
+                                nameof(InterceptorIntroducedCustomer.Addresses))!)
+                    ],
+                    typeof(InterceptorIntroducedCustomer))
+                : binding;
+    }
+
+    private class InterceptedAddress(string street, string city)
+    {
+        public string Street { get; set; } = street;
+        public string City { get; set; } = city;
+    }
+
+    private class DivergentCustomerContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder
+                .UseSqlite(testStore.ConnectionString)
+                .AddInterceptors(DivergentCollectionBindingInterceptor.Instance);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<DivergentCustomer>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.FactoryUsed);
+                    b.Ignore(e => e.AddressAssignmentCount);
+                    b.HasDiscriminator<string>("CustomerType")
+                        .HasValue<ConstructorCollectionCustomer>("Constructor")
+                        .HasValue<ProviderCollectionCustomer>("Provider");
+                    b.ComplexCollection(e => e.Addresses, cb => cb.ToJson());
+                });
+    }
+
+    private abstract class DivergentCustomer
+    {
+        private List<InterceptedAddress> _addresses = [];
+
+        public int Id { get; set; }
+        public List<InterceptedAddress> Addresses
+        {
+            get => _addresses;
+            set
+            {
+                _addresses = value;
+                AddressAssignmentCount++;
+            }
+        }
+
+        public bool FactoryUsed { get; protected set; }
+        public int AddressAssignmentCount { get; private set; }
+    }
+
+    private class ConstructorCollectionCustomer : DivergentCustomer
+    {
+        public static ConstructorCollectionCustomer Create(List<InterceptedAddress> addresses)
+            => new() { Addresses = addresses, FactoryUsed = true };
+    }
+
+    private class ProviderCollectionCustomer : DivergentCustomer;
+
+    private sealed class DivergentCollectionBindingInterceptor : IInstantiationBindingInterceptor
+    {
+        public static readonly DivergentCollectionBindingInterceptor Instance = new();
+
+        public InstantiationBinding ModifyBinding(
+            InstantiationBindingInterceptionData interceptionData,
+            InstantiationBinding binding)
+            => interceptionData.TypeBase.ClrType == typeof(ConstructorCollectionCustomer)
+                ? new FactoryMethodBinding(
+                    typeof(ConstructorCollectionCustomer).GetMethod(nameof(ConstructorCollectionCustomer.Create))!,
+                    [
+                        new ComplexPropertyParameterBinding(
+                            interceptionData.TypeBase.FindComplexProperty(nameof(DivergentCustomer.Addresses))!)
+                    ],
+                    typeof(ConstructorCollectionCustomer))
+                : binding;
+    }
+
+    private class CustomerWithNullableAddressCollectionContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder.UseSqlite(testStore.ConnectionString);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<CustomerWithNullableAddressCollection>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.ConstructorReceivedNull);
+                    b.ComplexCollection(e => e.Addresses, cb => cb.ToJson());
+                });
+    }
+
+    private class CustomerWithNullableAddressCollection(List<Address>? addresses)
+    {
+        public int Id { get; set; }
+        public List<Address>? Addresses { get; } = addresses;
+        public bool ConstructorReceivedNull { get; } = addresses is null;
+    }
+
+    private class CustomerWithProfileContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder.UseSqlite(testStore.ConnectionString);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<CustomerWithProfile>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.ComplexProperty(
+                        e => e.Profile,
+                        pb =>
+                        {
+                            pb.ToJson();
+                            pb.Property(p => p.Name);
+                            pb.Ignore(p => p.ConstructorAddressCount);
+                            pb.ComplexCollection(p => p.Addresses);
+                        });
+                });
+    }
+
+    private class CustomerWithProfile
+    {
+        public int Id { get; set; }
+        public Profile Profile { get; set; } = null!;
+    }
+
+    private class Profile(string name, List<Address> addresses)
+    {
+        public string Name { get; } = name;
+        public List<Address> Addresses { get; } = addresses;
+        public int ConstructorAddressCount { get; } = addresses.Count;
     }
 }

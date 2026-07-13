@@ -81,6 +81,15 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
     /// </summary>
     protected virtual ShapedQueryCompilingExpressionVisitorDependencies Dependencies { get; }
 
+    private IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> _constructorConsumedComplexCollections
+        = new Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>>();
+
+    /// <summary>
+    ///     Complex collection properties consumed by the interceptor-modified constructor binding for each concrete structural type.
+    /// </summary>
+    protected virtual IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> ConstructorConsumedComplexCollections
+        => _constructorConsumedComplexCollections;
+
     /// <summary>
     ///     The query compilation context object for current compilation.
     /// </summary>
@@ -372,6 +381,36 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
     {
     }
 
+    /// <summary>
+    ///     Called after a structural type is materialized, but before it's handed off to the change tracker.
+    /// </summary>
+    /// <param name="shaper">The structural type shaper.</param>
+    /// <param name="instanceVariable">The materialized instance.</param>
+    /// <param name="variables">Variables used by the materializer.</param>
+    /// <param name="expressions">Expressions used by the materializer.</param>
+    /// <param name="constructorConsumedComplexCollections">
+    ///     Complex collection properties consumed by the interceptor-modified constructor binding.
+    /// </param>
+    public virtual void AddStructuralTypeInitialization(
+        StructuralTypeShaperExpression shaper,
+        ParameterExpression instanceVariable,
+        List<ParameterExpression> variables,
+        List<Expression> expressions,
+        IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
+    {
+        var previousConstructorConsumedComplexCollections = _constructorConsumedComplexCollections;
+        _constructorConsumedComplexCollections = constructorConsumedComplexCollections;
+        try
+        {
+            // Deliberately dispatch through the legacy hook so provider subclasses overriding it continue to participate.
+            AddStructuralTypeInitialization(shaper, instanceVariable, variables, expressions);
+        }
+        finally
+        {
+            _constructorConsumedComplexCollections = previousConstructorConsumedComplexCollections;
+        }
+    }
+
     private sealed class StructuralTypeMaterializerInjector(
         ShapedQueryCompilingExpressionVisitor shapedQueryCompiler,
         IStructuralTypeMaterializerSource materializerSource,
@@ -650,11 +689,16 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
                 : (null, [structuralType]);
 
             var switchCases = new SwitchCase[concreteStructuralTypes.Length];
+            var constructorConsumedComplexCollections =
+                new Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>>();
             for (var i = 0; i < concreteStructuralTypes.Length; i++)
             {
                 var concreteStructuralType = concreteStructuralTypes[i];
                 switchCases[i] = SwitchCase(
-                    CreateFullMaterializeExpression(concreteStructuralTypes[i], expressionContext),
+                    CreateFullMaterializeExpression(
+                        concreteStructuralTypes[i],
+                        expressionContext,
+                        constructorConsumedComplexCollections),
                     supportsPrecompiledQuery
                         ? liftableConstantFactory.CreateLiftableConstant(
                             concreteStructuralTypes[i],
@@ -671,7 +715,12 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
 
             expressions.Add(Assign(instanceVariable, materializationExpression));
 
-            shapedQueryCompiler.AddStructuralTypeInitialization(shaper, instanceVariable, variables, expressions);
+            shapedQueryCompiler.AddStructuralTypeInitialization(
+                shaper,
+                instanceVariable,
+                variables,
+                expressions,
+                constructorConsumedComplexCollections);
 
             if (_queryStateManager && primaryKey is not null)
             {
@@ -711,7 +760,8 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
                 bool IsNullable,
                 ParameterExpression MaterializationContextVariable,
                 ParameterExpression ConcreteEntityTypeVariable,
-                ParameterExpression ShadowValuesVariable) materializeExpressionContext)
+                ParameterExpression ShadowValuesVariable) materializeExpressionContext,
+            Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
         {
             var (returnType,
                 nullable,
@@ -725,6 +775,17 @@ public abstract class ShapedQueryCompilingExpressionVisitor : ExpressionVisitor
                 .CreateMaterializeExpression(
                     new StructuralTypeMaterializerSourceParameters(
                         concreteStructuralType, "instance", returnType, nullable, queryTrackingBehavior), materializationContextVariable);
+
+            if (materializer is StructuralTypeMaterializationExpression structuralTypeMaterializationExpression)
+            {
+                constructorConsumedComplexCollections[concreteStructuralType]
+                    = structuralTypeMaterializationExpression.ConstructorConsumedComplexCollections;
+                materializer = structuralTypeMaterializationExpression.MaterializationExpression;
+            }
+            else
+            {
+                constructorConsumedComplexCollections[concreteStructuralType] = new HashSet<IComplexProperty>();
+            }
 
             if (_queryStateManager
                 && concreteStructuralType is IRuntimeEntityType { ShadowPropertyCount: > 0 } runtimeEntityType)

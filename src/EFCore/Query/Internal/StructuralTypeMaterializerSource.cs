@@ -116,7 +116,7 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
                 blockExpressions,
                 parameters.IsNullable);
 
-        return structuralType is IComplexType complexType
+        materializationExpression = structuralType is IComplexType complexType
             && ReadComplexTypeDirectly(complexType)
             && parameters.IsNullable
             ? HandleNullableComplexTypeMaterialization(
@@ -125,6 +125,18 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
                 materializationExpression,
                 getValueBufferExpression)
             : materializationExpression;
+
+        var constructorConsumedComplexCollections = constructorBinding.ParameterBindings
+            .SelectMany(p => p.ConsumedProperties)
+            .OfType<IComplexProperty>()
+            .Where(p => p.IsCollection)
+            .ToHashSet();
+
+        return constructorConsumedComplexCollections.Count == 0
+            ? materializationExpression
+            : new StructuralTypeMaterializationExpression(
+                materializationExpression,
+                constructorConsumedComplexCollections);
 
         // Creates a conditional expression that handles materialization of nullable complex types.
         // For nullable complex types, the method checks if all scalar properties are null
@@ -669,7 +681,10 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
 
         var materializationContextExpression = Parameter(typeof(MaterializationContext), "mc");
         var bindingInfo = new ParameterBindingInfo(
-            new StructuralTypeMaterializerSourceParameters(entityType, "instance", entityType.ClrType, nullable, null), materializationContextExpression, this);
+            new StructuralTypeMaterializerSourceParameters(entityType, "instance", entityType.ClrType, nullable, null),
+            materializationContextExpression,
+            this,
+            isEmptyMaterializer: true);
 
         var blockExpressions = new List<Expression>();
         var instanceVariable = Variable(binding.RuntimeType, "instance");
@@ -719,7 +734,8 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
             {
                 case ComplexPropertyParameterBinding complexPropertyBinding:
                     var complexProperty = (IComplexProperty)complexPropertyBinding.ConsumedProperties[0];
-                    if (!ReadComplexTypeDirectly(complexProperty.ComplexType))
+                    if (!complexProperty.IsCollection
+                        && !ReadComplexTypeDirectly(complexProperty.ComplexType))
                     {
                         throw new InvalidOperationException(
                             CoreStrings.ComplexPropertyConstructorBindingNotSupported(

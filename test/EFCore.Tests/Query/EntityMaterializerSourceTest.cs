@@ -730,6 +730,38 @@ public class EntityMaterializerSourceTest
         Assert.Equal(-122.3, address.Location.Longitude);
     }
 
+    [Fact]
+    public void Can_create_empty_materializer_for_complex_type_with_nested_complex_collection_constructor_binding()
+    {
+        using var context = new SomeEntityContext(b =>
+            b.Entity<EntityWithNestedComplexCollectionConstructor>()
+                .ComplexProperty(e => e.Profile, cb => cb.ComplexCollection(p => p.Addresses)));
+
+        var entityType = context.Model.FindEntityType(typeof(EntityWithNestedComplexCollectionConstructor))!;
+        var complexType = entityType.FindComplexProperty(nameof(EntityWithNestedComplexCollectionConstructor.Profile))!.ComplexType;
+        var source = new StructuralTypeMaterializerSource(new StructuralTypeMaterializerSourceDependencies([]));
+        var factory = source.GetEmptyMaterializer(complexType);
+        var materializationContext = new MaterializationContext(ValueBuffer.Empty, context);
+
+        var profile1 = (ProfileWithComplexCollection)factory(materializationContext);
+        var profile2 = (ProfileWithComplexCollection)factory(materializationContext);
+
+        Assert.Empty(profile1.Addresses);
+        Assert.Empty(profile2.Addresses);
+        Assert.NotSame(profile1.Addresses, profile2.Addresses);
+    }
+
+    private class EntityWithNestedComplexCollectionConstructor
+    {
+        public int Id { get; set; }
+        public ProfileWithComplexCollection Profile { get; set; } = null!;
+    }
+
+    private class ProfileWithComplexCollection(List<AddressForTest> addresses)
+    {
+        public List<AddressForTest> Addresses { get; } = addresses;
+    }
+
     private class EntityWithNestedComplexConstructor(NestedAddress address)
     {
         public int Id { get; set; }
@@ -864,6 +896,44 @@ public class EntityMaterializerSourceTest
         public string Zip { get; set; } = zip;
     }
 #nullable restore
+
+    [Fact]
+    public void Collection_consumption_hook_dispatches_through_legacy_provider_override()
+    {
+        var visitor = (LegacyStructuralTypeInitializationVisitor)
+            System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(
+                typeof(LegacyStructuralTypeInitializationVisitor));
+
+        visitor.AddStructuralTypeInitialization(
+            shaper: null!,
+            instanceVariable: null!,
+            variables: [],
+            expressions: [],
+            constructorConsumedComplexCollections:
+                new Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>>());
+
+        Assert.True(visitor.LegacyHookCalled);
+    }
+
+    private sealed class LegacyStructuralTypeInitializationVisitor : ShapedQueryCompilingExpressionVisitor
+    {
+        private LegacyStructuralTypeInitializationVisitor()
+            : base(null!, null!)
+        {
+        }
+
+        public bool LegacyHookCalled { get; private set; }
+
+        public override void AddStructuralTypeInitialization(
+            StructuralTypeShaperExpression shaper,
+            ParameterExpression instanceVariable,
+            List<ParameterExpression> variables,
+            List<Expression> expressions)
+            => LegacyHookCalled = true;
+
+        protected override Expression VisitShapedQuery(ShapedQueryExpression shapedQueryExpression)
+            => throw new NotSupportedException();
+    }
 
     private class ObjectArrayBindingInterceptor : IInstantiationBindingInterceptor
     {

@@ -566,13 +566,6 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
                 GetString("CompiledQueryDifferentModel", nameof(queryExpression)),
                 queryExpression);
 
-        /// <summary>
-        ///     The complex collection property '{type}.{property}' cannot be bound to a constructor parameter. Complex collection properties cannot be injected via the constructor; use a settable property instead.
-        /// </summary>
-        public static string ComplexCollectionConstructorBinding(object? type, object? property)
-            => string.Format(
-                GetString("ComplexCollectionConstructorBinding", nameof(type), nameof(property)),
-                type, property);
 
         /// <summary>
         ///     The complex entry at ordinal '{ordinal}' for the collection '{declaringType}.{collection}' cannot be accessed as the containing entry is in the deleted state.

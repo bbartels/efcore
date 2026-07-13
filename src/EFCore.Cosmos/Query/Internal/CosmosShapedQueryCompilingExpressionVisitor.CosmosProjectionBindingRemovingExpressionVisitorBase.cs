@@ -16,6 +16,7 @@ namespace Microsoft.EntityFrameworkCore.Cosmos.Query.Internal;
 public partial class CosmosShapedQueryCompilingExpressionVisitor
 {
     private abstract class CosmosProjectionBindingRemovingExpressionVisitorBase(
+        CosmosShapedQueryCompilingExpressionVisitor parentVisitor,
         ParameterExpression jTokenParameter,
         bool trackQueryResults)
         : ExpressionVisitor
@@ -253,6 +254,18 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor
         {
             switch (extensionExpression)
             {
+                case ComplexCollectionMaterializationExpression complexCollectionMaterializationExpression:
+                {
+                    var materializationContext =
+                        (ParameterExpression)complexCollectionMaterializationExpression.MaterializationContextExpression;
+                    var parentJObject = _projectionBindings[_materializationContextBindings[materializationContext]];
+
+                    return Visit(
+                        parentVisitor.CreateComplexCollectionMaterializationExpression(
+                            complexCollectionMaterializationExpression.ComplexProperty,
+                            parentJObject));
+                }
+
                 case ProjectionBindingExpression projectionBindingExpression:
                 {
                     var projection = GetProjection(projectionBindingExpression);

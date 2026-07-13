@@ -70,7 +70,7 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
         }
 
         shaperBody = new CosmosProjectionBindingRemovingExpressionVisitor(
-                selectExpression, jTokenParameter,
+                this, selectExpression, jTokenParameter,
                 QueryCompilationContext.QueryTrackingBehavior == QueryTrackingBehavior.TrackAll)
             .Visit(shaperBody);
 
@@ -180,15 +180,74 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
     ///     any release. You should only use it directly in your code with extreme caution and knowing that
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
-    public override void AddStructuralTypeInitialization(StructuralTypeShaperExpression shaper, ParameterExpression instanceVariable, List<ParameterExpression> variables, List<Expression> expressions)
+    public override void AddStructuralTypeInitialization(
+        StructuralTypeShaperExpression shaper,
+        ParameterExpression instanceVariable,
+        List<ParameterExpression> variables,
+        List<Expression> expressions)
     {
         foreach (var complexProperty in shaper.StructuralType.GetComplexProperties())
         {
-            var member = MakeMemberAccess(instanceVariable, complexProperty.GetMemberInfo(true, true));
-            expressions.Add(complexProperty.IsCollection
-                ? CreateComplexCollectionAssignmentBlock(member, complexProperty)
-                : CreateComplexPropertyAssignmentBlock(member, complexProperty));
+            var initializationExpression = complexProperty.IsCollection
+                ? CreateComplexCollectionAssignmentBlock(
+                    MakeMemberAccess(instanceVariable, complexProperty.GetMemberInfo(true, true)),
+                    complexProperty)
+                : CreateComplexPropertyAssignmentBlock(
+                    MakeMemberAccess(instanceVariable, complexProperty.GetMemberInfo(true, true)),
+                    complexProperty);
+
+            if (!complexProperty.IsCollection)
+            {
+                expressions.Add(initializationExpression);
+                continue;
+            }
+
+            var shouldPopulateComplexCollection = CreateComplexCollectionPopulationCondition(
+                instanceVariable,
+                complexProperty,
+                ConstructorConsumedComplexCollections);
+            if (shouldPopulateComplexCollection is ConstantExpression { Value: false })
+            {
+                continue;
+            }
+
+            expressions.Add(
+                shouldPopulateComplexCollection is ConstantExpression { Value: true }
+                    ? initializationExpression
+                    : IfThen(shouldPopulateComplexCollection, initializationExpression));
         }
+    }
+
+    private static Expression CreateComplexCollectionPopulationCondition(
+        Expression instanceExpression,
+        IComplexProperty complexProperty,
+        IReadOnlyDictionary<ITypeBase, IReadOnlySet<IComplexProperty>> constructorConsumedComplexCollections)
+    {
+        var applicableTypes = constructorConsumedComplexCollections.Keys
+            .Where(complexProperty.DeclaringType.IsAssignableFrom)
+            .ToList();
+        var nonConsumingTypes = applicableTypes
+            .Where(t => !constructorConsumedComplexCollections[t].Contains(complexProperty))
+            .ToList();
+
+        if (nonConsumingTypes.Count == applicableTypes.Count)
+        {
+            return Constant(true);
+        }
+
+        if (nonConsumingTypes.Count == 0)
+        {
+            return Constant(false);
+        }
+
+        return nonConsumingTypes
+            .Select(
+                type => applicableTypes
+                    .Where(derivedType => derivedType != type && type.IsAssignableFrom(derivedType))
+                    .Select(derivedType => (Expression)Not(TypeIs(instanceExpression, derivedType.ClrType)))
+                    .Prepend(TypeIs(instanceExpression, type.ClrType))
+                    .Aggregate(AndAlso))
+            .Aggregate(OrElse);
     }
 
     private BlockExpression CreateComplexPropertyAssignmentBlock(MemberExpression memberExpression, IComplexProperty complexProperty)
@@ -218,6 +277,13 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
     }
 
     private BlockExpression CreateComplexCollectionAssignmentBlock(MemberExpression memberExpression, IComplexProperty complexProperty)
+        => Block(
+            memberExpression.Assign(
+                CreateComplexCollectionMaterializationExpression(complexProperty, _parentJObject)));
+
+    private BlockExpression CreateComplexCollectionMaterializationExpression(
+        IComplexProperty complexProperty,
+        Expression parentJObject)
     {
         var complexJArrayVariable = Variable(
             typeof(JArray),
@@ -226,7 +292,7 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
         var assignJArrayVariable = Assign(complexJArrayVariable,
             Call(
                 CosmosProjectionBindingRemovingExpressionVisitorBase.ToObjectWithSerializerMethodInfo.MakeGenericMethod(typeof(JArray)),
-                Call(_parentJObject, CosmosProjectionBindingRemovingExpressionVisitorBase.GetItemMethodInfo,
+                Call(parentJObject, CosmosProjectionBindingRemovingExpressionVisitorBase.GetItemMethodInfo,
                     Constant(complexProperty.GetJsonPropertyName()))));
 
         var jObjectParameter = Parameter(typeof(JObject), "complexJObject" + _currentComplexIndex);
@@ -256,7 +322,7 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
             [complexJArrayVariable],
             [
                 assignJArrayVariable,
-                memberExpression.Assign(populateExpression)
+                populateExpression
             ]
         );
     }

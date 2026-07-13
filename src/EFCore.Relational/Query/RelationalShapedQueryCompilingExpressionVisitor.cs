@@ -503,7 +503,11 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor : ShapedQue
     {
         Check.DebugAssert(_currentShaperProcessor is not null);
 
-        _currentShaperProcessor.ProcessTopLevelComplexJsonProperties(shaper, instanceVariable, expressions);
+        _currentShaperProcessor.ProcessTopLevelComplexJsonProperties(
+            shaper,
+            instanceVariable,
+            expressions,
+            ConstructorConsumedComplexCollections);
     }
 
     private Expression CreateRelationalCommandResolverExpression(Expression queryExpression)
