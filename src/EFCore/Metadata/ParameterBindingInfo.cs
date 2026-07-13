@@ -51,16 +51,19 @@ public readonly struct ParameterBindingInfo
     /// <param name="materializerSourceParameters">Parameters for the materialization that is happening.</param>
     /// <param name="materializationContextExpression">The expression tree from which the parameter value will come.</param>
     /// <param name="materializerSource">The materializer source used to generate expressions for nested complex type bindings.</param>
+    /// <param name="isEmptyMaterializer">Whether this binding is being created outside the query pipeline for an empty materializer.</param>
     internal ParameterBindingInfo(
         StructuralTypeMaterializerSourceParameters materializerSourceParameters,
         Expression materializationContextExpression,
-        IStructuralTypeMaterializerSource? materializerSource)
+        IStructuralTypeMaterializerSource? materializerSource,
+        bool isEmptyMaterializer = false)
     {
         StructuralType = materializerSourceParameters.StructuralType;
         QueryTrackingBehavior = materializerSourceParameters.QueryTrackingBehavior;
         InstanceName = materializerSourceParameters.InstanceName;
         MaterializationContextExpression = materializationContextExpression;
         MaterializerSource = materializerSource;
+        IsEmptyMaterializer = isEmptyMaterializer;
     }
 
     /// <summary>
@@ -88,6 +91,11 @@ public readonly struct ParameterBindingInfo
     ///     Set when materializing types that may have complex property constructor parameters.
     /// </summary>
     internal IStructuralTypeMaterializerSource? MaterializerSource { get; }
+
+    /// <summary>
+    ///     Whether the binding is being created for an empty materializer outside the query pipeline.
+    /// </summary>
+    internal bool IsEmptyMaterializer { get; }
 
     /// <summary>
     ///     Expressions holding initialized instances for service properties.

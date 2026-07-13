@@ -70,7 +70,7 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
         }
 
         shaperBody = new CosmosProjectionBindingRemovingExpressionVisitor(
-                selectExpression, jTokenParameter,
+                this, selectExpression, jTokenParameter,
                 QueryCompilationContext.QueryTrackingBehavior == QueryTrackingBehavior.TrackAll)
             .Visit(shaperBody);
 
@@ -184,6 +184,13 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
     {
         foreach (var complexProperty in shaper.StructuralType.GetComplexProperties())
         {
+            if (shaper.StructuralType.ConstructorBinding?.ParameterBindings
+                    .SelectMany(p => p.ConsumedProperties)
+                    .Contains(complexProperty) == true)
+            {
+                continue;
+            }
+
             var member = MakeMemberAccess(instanceVariable, complexProperty.GetMemberInfo(true, true));
             expressions.Add(complexProperty.IsCollection
                 ? CreateComplexCollectionAssignmentBlock(member, complexProperty)
@@ -218,6 +225,13 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
     }
 
     private BlockExpression CreateComplexCollectionAssignmentBlock(MemberExpression memberExpression, IComplexProperty complexProperty)
+        => Block(
+            memberExpression.Assign(
+                CreateComplexCollectionMaterializationExpression(complexProperty, _parentJObject)));
+
+    private BlockExpression CreateComplexCollectionMaterializationExpression(
+        IComplexProperty complexProperty,
+        Expression parentJObject)
     {
         var complexJArrayVariable = Variable(
             typeof(JArray),
@@ -226,7 +240,7 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
         var assignJArrayVariable = Assign(complexJArrayVariable,
             Call(
                 CosmosProjectionBindingRemovingExpressionVisitorBase.ToObjectWithSerializerMethodInfo.MakeGenericMethod(typeof(JArray)),
-                Call(_parentJObject, CosmosProjectionBindingRemovingExpressionVisitorBase.GetItemMethodInfo,
+                Call(parentJObject, CosmosProjectionBindingRemovingExpressionVisitorBase.GetItemMethodInfo,
                     Constant(complexProperty.GetJsonPropertyName()))));
 
         var jObjectParameter = Parameter(typeof(JObject), "complexJObject" + _currentComplexIndex);
@@ -256,7 +270,7 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
             [complexJArrayVariable],
             [
                 assignJArrayVariable,
-                memberExpression.Assign(populateExpression)
+                populateExpression
             ]
         );
     }

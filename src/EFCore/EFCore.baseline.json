@@ -1315,6 +1315,34 @@
       ]
     },
     {
+      "Type": "sealed class Microsoft.EntityFrameworkCore.Query.ComplexCollectionMaterializationExpression : System.Linq.Expressions.Expression, Microsoft.EntityFrameworkCore.Query.IPrintableExpression",
+      "Methods": [
+        {
+          "Member": "ComplexCollectionMaterializationExpression(Microsoft.EntityFrameworkCore.Metadata.IComplexProperty complexProperty, System.Linq.Expressions.Expression materializationContextExpression);"
+        },
+        {
+          "Member": "void Print(Microsoft.EntityFrameworkCore.Query.ExpressionPrinter expressionPrinter);"
+        },
+        {
+          "Member": "override System.Linq.Expressions.Expression VisitChildren(System.Linq.Expressions.ExpressionVisitor visitor);"
+        }
+      ],
+      "Properties": [
+        {
+          "Member": "Microsoft.EntityFrameworkCore.Metadata.IComplexProperty ComplexProperty { get; }"
+        },
+        {
+          "Member": "System.Linq.Expressions.Expression MaterializationContextExpression { get; }"
+        },
+        {
+          "Member": "override System.Linq.Expressions.ExpressionType NodeType { get; }"
+        },
+        {
+          "Member": "override System.Type Type { get; }"
+        }
+      ]
+    },
+    {
       "Type": "class Microsoft.EntityFrameworkCore.Metadata.Builders.ComplexCollectionTypePropertyBuilder : Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<Microsoft.EntityFrameworkCore.Metadata.Builders.IConventionPropertyBuilder>",
       "Methods": [
         {
@@ -3773,9 +3801,6 @@
         },
         {
           "Member": "static string CompiledQueryDifferentModel(object? queryExpression);"
-        },
-        {
-          "Member": "static string ComplexCollectionConstructorBinding(object? type, object? property);"
         },
         {
           "Member": "static string ComplexCollectionEntryDeletedEntity(object? ordinal, object? declaringType, object? collection);"

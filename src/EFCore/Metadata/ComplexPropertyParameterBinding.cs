@@ -1,7 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore.Query;
+using static System.Linq.Expressions.Expression;
 
 namespace Microsoft.EntityFrameworkCore.Metadata;
 
@@ -15,6 +17,9 @@ namespace Microsoft.EntityFrameworkCore.Metadata;
 /// </remarks>
 public class ComplexPropertyParameterBinding : ParameterBinding
 {
+    private static readonly MethodInfo CreateCollectionMethod
+        = typeof(IClrIndexedCollectionAccessor).GetMethod(nameof(IClrIndexedCollectionAccessor.Create))!;
+
     /// <summary>
     ///     Creates a new <see cref="ComplexPropertyParameterBinding" /> instance for the given <see cref="IComplexProperty" />.
     /// </summary>
@@ -22,13 +27,6 @@ public class ComplexPropertyParameterBinding : ParameterBinding
     public ComplexPropertyParameterBinding(IComplexProperty complexProperty)
         : base(complexProperty.ClrType, complexProperty)
     {
-        if (complexProperty.IsCollection)
-        {
-            throw new ArgumentException(
-                CoreStrings.ComplexCollectionConstructorBinding(
-                    complexProperty.DeclaringType.DisplayName(), complexProperty.Name),
-                nameof(complexProperty));
-        }
     }
 
     /// <summary>
@@ -40,6 +38,23 @@ public class ComplexPropertyParameterBinding : ParameterBinding
     public override Expression BindToParameter(ParameterBindingInfo bindingInfo)
     {
         var complexProperty = (IComplexProperty)ConsumedProperties[0];
+
+        if (complexProperty.IsCollection)
+        {
+            if (bindingInfo.IsEmptyMaterializer)
+            {
+                return Convert(
+                    Call(
+                        Constant(((IRuntimePropertyBase)complexProperty).GetIndexedCollectionAccessor()),
+                        CreateCollectionMethod,
+                        Constant(0)),
+                    complexProperty.ClrType);
+            }
+
+            return new ComplexCollectionMaterializationExpression(
+                complexProperty,
+                bindingInfo.MaterializationContextExpression);
+        }
 
         Check.DebugAssert(
             bindingInfo.MaterializerSource != null,

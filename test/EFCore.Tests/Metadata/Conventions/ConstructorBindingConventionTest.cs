@@ -834,9 +834,9 @@ public class ConstructorBindingConventionTest
 #pragma warning restore CS9113
 
     [Fact]
-    public void Does_not_bind_complex_collection_property_parameter()
+    public void Prefers_bindable_constructor_with_fewer_property_parameters_when_complex_collection_is_bindable()
     {
-        // The constructor taking the complex collection cannot be bound, so the smaller constructor is used.
+        // Both constructors can be bound; the existing constructor-selection policy chooses the one with fewer property parameters.
         var binding = GetBindingWithComplexProperty<BlogWithComplexCollection>(
             entityType =>
             {
@@ -867,7 +867,7 @@ public class ConstructorBindingConventionTest
 #pragma warning restore CS9113
 
     [Fact]
-    public void Throws_when_creating_complex_property_binding_for_collection()
+    public void Creates_complex_property_binding_for_collection()
     {
         var entityType = ((IMutableModel)new Model()).AddEntityType(typeof(BlogWithComplexCollection));
         entityType.AddProperty(nameof(Blog.Id), typeof(int));
@@ -876,13 +876,16 @@ public class ConstructorBindingConventionTest
             nameof(BlogWithComplexCollection.Addresses), typeof(List<Address>), typeof(Address), collection: true)!;
         complexProperty.ComplexType.AddProperty(nameof(Address.Street), typeof(string));
 
-        var exception = Assert.Throws<ArgumentException>(
-            () => new ComplexPropertyParameterBinding((IComplexProperty)complexProperty));
+        var binding = new ComplexPropertyParameterBinding((IComplexProperty)complexProperty);
 
-        Assert.StartsWith(
-            CoreStrings.ComplexCollectionConstructorBinding(
-                nameof(BlogWithComplexCollection), nameof(BlogWithComplexCollection.Addresses)),
-            exception.Message);
+        Assert.Same(complexProperty, binding.ConsumedProperties.Single());
+
+        var materializationContext = Expression.Parameter(typeof(MaterializationContext));
+        var expression = Assert.IsType<ComplexCollectionMaterializationExpression>(
+            binding.BindToParameter(new ParameterBindingInfo((ITypeBase)entityType, materializationContext)));
+
+        Assert.Same(complexProperty, expression.ComplexProperty);
+        Assert.Same(materializationContext, expression.MaterializationContextExpression);
     }
 
     [Fact]

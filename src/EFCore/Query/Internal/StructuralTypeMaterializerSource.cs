@@ -669,7 +669,10 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
 
         var materializationContextExpression = Parameter(typeof(MaterializationContext), "mc");
         var bindingInfo = new ParameterBindingInfo(
-            new StructuralTypeMaterializerSourceParameters(entityType, "instance", entityType.ClrType, nullable, null), materializationContextExpression, this);
+            new StructuralTypeMaterializerSourceParameters(entityType, "instance", entityType.ClrType, nullable, null),
+            materializationContextExpression,
+            this,
+            isEmptyMaterializer: true);
 
         var blockExpressions = new List<Expression>();
         var instanceVariable = Variable(binding.RuntimeType, "instance");
@@ -719,7 +722,8 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
             {
                 case ComplexPropertyParameterBinding complexPropertyBinding:
                     var complexProperty = (IComplexProperty)complexPropertyBinding.ConsumedProperties[0];
-                    if (!ReadComplexTypeDirectly(complexProperty.ComplexType))
+                    if (!complexProperty.IsCollection
+                        && !ReadComplexTypeDirectly(complexProperty.ComplexType))
                     {
                         throw new InvalidOperationException(
                             CoreStrings.ComplexPropertyConstructorBindingNotSupported(

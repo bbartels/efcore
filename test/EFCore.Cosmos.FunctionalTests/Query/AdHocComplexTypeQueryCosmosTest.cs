@@ -311,6 +311,59 @@ OFFSET 0 LIMIT 2
 """);
     }
 
+    [Fact]
+    public async Task Complex_collection_is_injected_into_constructor()
+    {
+        var contextFactory = await InitializeNonSharedTest<ComplexCollectionConstructorContext>(
+            seed: context =>
+            {
+                context.Add(
+                    new ComplexCollectionConstructorContext.Customer(
+                        [
+                            new ComplexCollectionConstructorContext.Address("Main St", "Springfield"),
+                            new ComplexCollectionConstructorContext.Address("Evergreen Terrace", "Springfield")
+                        ])
+                    {
+                        Id = "1"
+                    });
+                return context.SaveChangesAsync();
+            });
+
+        await using var context = contextFactory.CreateDbContext();
+        var customer = await context.Set<ComplexCollectionConstructorContext.Customer>().SingleAsync();
+
+        Assert.Equal(2, customer.ConstructorAddressCount);
+        Assert.Collection(
+            customer.Addresses,
+            address => Assert.Equal("Main St", address.Street),
+            address => Assert.Equal("Evergreen Terrace", address.Street));
+    }
+
+    protected class ComplexCollectionConstructorContext(DbContextOptions options) : DbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<Customer>(b =>
+            {
+                b.HasKey(e => e.Id);
+                b.Property(e => e.Id).ValueGeneratedNever();
+                b.Ignore(e => e.ConstructorAddressCount);
+                b.ComplexCollection(e => e.Addresses);
+            });
+
+        public class Customer(List<Address> addresses)
+        {
+            public string Id { get; set; } = null!;
+            public List<Address> Addresses { get; } = addresses;
+            public int ConstructorAddressCount { get; } = addresses.Count;
+        }
+
+        public class Address(string street, string city)
+        {
+            public string Street { get; set; } = street;
+            public string City { get; set; } = city;
+        }
+    }
+
     protected class ComplexKeyDiscriminatorContext(DbContextOptions options) : DbContext(options)
     {
         protected override void OnModelCreating(ModelBuilder modelBuilder)
