@@ -180,13 +180,34 @@ public partial class CosmosShapedQueryCompilingExpressionVisitor(
     ///     any release. You should only use it directly in your code with extreme caution and knowing that
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
-    public override void AddStructuralTypeInitialization(StructuralTypeShaperExpression shaper, ParameterExpression instanceVariable, List<ParameterExpression> variables, List<Expression> expressions)
+    public override void AddStructuralTypeInitialization(
+        StructuralTypeShaperExpression shaper,
+        ParameterExpression instanceVariable,
+        List<ParameterExpression> variables,
+        List<Expression> expressions)
+        => AddStructuralTypeInitialization(
+            shaper,
+            instanceVariable,
+            variables,
+            expressions,
+            shaper.StructuralType.ConstructorBinding?.ParameterBindings
+                .SelectMany(p => p.ConsumedProperties)
+                .OfType<IComplexProperty>()
+                .Where(p => p.IsCollection)
+                .ToHashSet()
+            ?? []);
+
+    /// <inheritdoc />
+    public override void AddStructuralTypeInitialization(
+        StructuralTypeShaperExpression shaper,
+        ParameterExpression instanceVariable,
+        List<ParameterExpression> variables,
+        List<Expression> expressions,
+        IReadOnlySet<IComplexProperty> constructorConsumedComplexCollections)
     {
         foreach (var complexProperty in shaper.StructuralType.GetComplexProperties())
         {
-            if (shaper.StructuralType.ConstructorBinding?.ParameterBindings
-                    .SelectMany(p => p.ConsumedProperties)
-                    .Contains(complexProperty) == true)
+            if (constructorConsumedComplexCollections.Contains(complexProperty))
             {
                 continue;
             }

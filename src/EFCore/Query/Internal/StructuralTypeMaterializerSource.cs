@@ -116,7 +116,7 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
                 blockExpressions,
                 parameters.IsNullable);
 
-        return structuralType is IComplexType complexType
+        materializationExpression = structuralType is IComplexType complexType
             && ReadComplexTypeDirectly(complexType)
             && parameters.IsNullable
             ? HandleNullableComplexTypeMaterialization(
@@ -125,6 +125,18 @@ public class StructuralTypeMaterializerSource : IStructuralTypeMaterializerSourc
                 materializationExpression,
                 getValueBufferExpression)
             : materializationExpression;
+
+        var constructorConsumedComplexCollections = constructorBinding.ParameterBindings
+            .SelectMany(p => p.ConsumedProperties)
+            .OfType<IComplexProperty>()
+            .Where(p => p.IsCollection)
+            .ToHashSet();
+
+        return constructorConsumedComplexCollections.Count == 0
+            ? materializationExpression
+            : new StructuralTypeMaterializationExpression(
+                materializationExpression,
+                constructorConsumedComplexCollections);
 
         // Creates a conditional expression that handles materialization of nullable complex types.
         // For nullable complex types, the method checks if all scalar properties are null

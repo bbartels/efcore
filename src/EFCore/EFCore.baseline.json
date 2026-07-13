@@ -23720,6 +23720,9 @@
           "Member": "virtual void AddStructuralTypeInitialization(Microsoft.EntityFrameworkCore.Query.StructuralTypeShaperExpression shaper, System.Linq.Expressions.ParameterExpression instanceVariable, System.Collections.Generic.List<System.Linq.Expressions.ParameterExpression> variables, System.Collections.Generic.List<System.Linq.Expressions.Expression> expressions);"
         },
         {
+          "Member": "virtual void AddStructuralTypeInitialization(Microsoft.EntityFrameworkCore.Query.StructuralTypeShaperExpression shaper, System.Linq.Expressions.ParameterExpression instanceVariable, System.Collections.Generic.List<System.Linq.Expressions.ParameterExpression> variables, System.Collections.Generic.List<System.Linq.Expressions.Expression> expressions, System.Collections.Generic.IReadOnlySet<Microsoft.EntityFrameworkCore.Metadata.IComplexProperty> constructorConsumedComplexCollections);"
+        },
+        {
           "Member": "virtual System.Linq.Expressions.Expression InjectEntityMaterializers(System.Linq.Expressions.Expression expression);",
           "Stage": "Obsolete"
         },

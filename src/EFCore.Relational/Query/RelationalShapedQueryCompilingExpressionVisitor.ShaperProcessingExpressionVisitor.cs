@@ -186,6 +186,9 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
         private readonly Dictionary<ParameterExpression, ParameterExpression>
             _jsonReaderDataToJsonReaderManagerParameterMapping = new();
 
+        private readonly Dictionary<ITypeBase, IReadOnlySet<IComplexProperty>>
+            _constructorConsumedComplexCollections = new();
+
         /// <summary>
         ///     Map between index of the non-constant json array element access
         ///     and the variable we store it's value that we extract from the reader
@@ -1630,6 +1633,8 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
 
             var structuralTypeShaperMaterializer =
                 (BlockExpression)_parentVisitor.InjectStructuralTypeMaterializers(structuralTypeShaperExpression);
+            var constructorConsumedComplexCollections = _constructorConsumedComplexCollections.GetValueOrDefault(structuralType)
+                ?? (IReadOnlySet<IComplexProperty>)new HashSet<IComplexProperty>();
 
             var innerShapersMap = new Dictionary<string, Expression>();
             var innerFixupMap = new Dictionary<string, LambdaExpression>();
@@ -1680,9 +1685,8 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
                 var navigationJsonPropertyName = relatedStructuralType.GetJsonPropertyName()!;
                 innerShapersMap[navigationJsonPropertyName] = innerShaper;
 
-                var isConsumedByConstructor = structuralType.ConstructorBinding?.ParameterBindings
-                    .SelectMany(p => p.ConsumedProperties)
-                    .Contains(nestedStructuralProperty) == true;
+                var isConsumedByConstructor = nestedStructuralProperty is IComplexProperty complexProperty
+                    && constructorConsumedComplexCollections.Contains(complexProperty);
 
                 if (nestedStructuralProperty.IsCollection)
                 {
@@ -1783,7 +1787,8 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
                 jsonReaderDataShaperLambdaParameter,
                 innerShapersMap,
                 innerFixupMap,
-                trackingInnerFixupMap).Rewrite(structuralTypeShaperMaterializer);
+                trackingInnerFixupMap,
+                constructorConsumedComplexCollections).Rewrite(structuralTypeShaperMaterializer);
 
             var entityShaperMaterializerVariable = Variable(
                 structuralTypeShaperMaterializer.Type,
@@ -1932,7 +1937,8 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
             ParameterExpression jsonReaderDataParameter,
             IDictionary<string, Expression> innerShapersMap,
             IDictionary<string, LambdaExpression> innerFixupMap,
-            IDictionary<string, LambdaExpression> trackingInnerFixupMap)
+            IDictionary<string, LambdaExpression> trackingInnerFixupMap,
+            IReadOnlySet<IComplexProperty> constructorConsumedComplexCollections)
             : ExpressionVisitor
         {
             private static readonly PropertyInfo JsonEncodedTextEncodedUtf8BytesProperty
@@ -2088,14 +2094,9 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
                     var propertyAssignmentReplacer = new ValueBufferTryReadValueMethodsReplacer(
                         jsonStructuralTypeVariable,
                         propertyAssignmentMap,
-                        structuralType.ConstructorBinding?.ParameterBindings
-                            .SelectMany(p => p.ConsumedProperties)
-                            .OfType<IComplexProperty>()
-                            .Where(p => p.IsCollection)
-                            .ToDictionary(
-                                p => p,
-                                p => _navigationVariableMap[p.ComplexType.GetJsonPropertyName()!])
-                            ?? []);
+                        constructorConsumedComplexCollections.ToDictionary(
+                            p => p,
+                            p => _navigationVariableMap[p.ComplexType.GetJsonPropertyName()!]));
 
                     if (body.Expressions[0] is BinaryExpression
                         {
@@ -2588,8 +2589,11 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
         internal void ProcessTopLevelComplexJsonProperties(
             StructuralTypeShaperExpression shaper,
             ParameterExpression instanceVariable,
-            List<Expression> expressions)
+            List<Expression> expressions,
+            IReadOnlySet<IComplexProperty> constructorConsumedComplexCollections)
         {
+            _constructorConsumedComplexCollections[shaper.StructuralType] = constructorConsumedComplexCollections;
+
             // Note that the following processes only top-level complex properties (where the projection is a dictionary of properties to their projection index).
             // For nested JSON types, CreateJsonShapers calls itself recursively.
             if (shaper is RelationalStructuralTypeShaperExpression
@@ -2602,9 +2606,7 @@ public partial class RelationalShapedQueryCompilingExpressionVisitor
                 {
                     if (property is IComplexProperty { ComplexType: var complexType } complexProperty
                         && complexType.IsMappedToJson()
-                        && complexProperty.DeclaringType.ConstructorBinding?.ParameterBindings
-                            .SelectMany(p => p.ConsumedProperties)
-                            .Contains(complexProperty) != true)
+                        && !constructorConsumedComplexCollections.Contains(complexProperty))
                     {
                         var jsonReaderDataVariable = GenerateJsonReader(projectionIndex, complexType);
 

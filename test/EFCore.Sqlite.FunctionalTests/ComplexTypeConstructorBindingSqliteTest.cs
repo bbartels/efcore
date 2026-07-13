@@ -375,6 +375,61 @@ public class ComplexTypeConstructorBindingSqliteTest
         }
     }
 
+    [Fact]
+    public async Task Replacement_interceptor_removing_collection_binding_keeps_provider_population()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCollectionCtorBindingInterceptorRemoves");
+
+        using (var context = new InterceptedCustomerContext(testStore, RemoveCollectionBindingInterceptor.Instance))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new InterceptedCustomer(
+                    [new InterceptedAddress("Main St", "Springfield")])
+                {
+                    Id = 1
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new InterceptedCustomerContext(testStore, RemoveCollectionBindingInterceptor.Instance))
+        {
+            var customer = context.Set<InterceptedCustomer>().Single();
+
+            Assert.True(customer.FactoryUsed);
+            Assert.Equal("Main St", Assert.Single(customer.Addresses).Street);
+        }
+    }
+
+    [Fact]
+    public async Task Replacement_interceptor_introducing_collection_binding_avoids_duplicate_provider_population()
+    {
+        await using var testStore = SqliteTestStore.Create("ComplexCollectionCtorBindingInterceptorIntroduces");
+
+        using (var context = new InterceptorIntroducedCustomerContext(testStore))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreatedResiliently();
+            context.Add(
+                new InterceptorIntroducedCustomer
+                {
+                    Id = 1,
+                    Addresses = [new InterceptedAddress("Main St", "Springfield")]
+                });
+            context.SaveChanges();
+        }
+
+        using (var context = new InterceptorIntroducedCustomerContext(testStore))
+        {
+            var customer = context.Set<InterceptorIntroducedCustomer>().Single();
+
+            Assert.True(customer.FactoryUsed);
+            Assert.Equal(1, customer.AddressAssignmentCount);
+            Assert.Equal("Main St", Assert.Single(customer.Addresses).Street);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -640,6 +695,116 @@ public class ComplexTypeConstructorBindingSqliteTest
     }
 
     public class ProxyAddress(string street, string city)
+    {
+        public string Street { get; set; } = street;
+        public string City { get; set; } = city;
+    }
+
+    private class InterceptedCustomerContext(
+        SqliteTestStore testStore,
+        IInstantiationBindingInterceptor interceptor) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder
+                .UseSqlite(testStore.ConnectionString)
+                .AddInterceptors(interceptor);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<InterceptedCustomer>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.FactoryUsed);
+                    b.ComplexCollection(e => e.Addresses, cb => cb.ToJson());
+                });
+    }
+
+    private class InterceptedCustomer(List<InterceptedAddress> addresses)
+    {
+        public int Id { get; set; }
+        public List<InterceptedAddress> Addresses { get; set; } = addresses;
+        public bool FactoryUsed { get; private set; }
+
+        public static InterceptedCustomer Create()
+            => new([]) { FactoryUsed = true };
+    }
+
+    private sealed class RemoveCollectionBindingInterceptor : IInstantiationBindingInterceptor
+    {
+        public static readonly RemoveCollectionBindingInterceptor Instance = new();
+
+        public InstantiationBinding ModifyBinding(
+            InstantiationBindingInterceptionData interceptionData,
+            InstantiationBinding binding)
+            => interceptionData.TypeBase.ClrType == typeof(InterceptedCustomer)
+                ? new FactoryMethodBinding(
+                    typeof(InterceptedCustomer).GetMethod(nameof(InterceptedCustomer.Create))!,
+                    [],
+                    typeof(InterceptedCustomer))
+                : binding;
+    }
+
+    private class InterceptorIntroducedCustomerContext(SqliteTestStore testStore) : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder
+                .UseSqlite(testStore.ConnectionString)
+                .AddInterceptors(IntroduceCollectionBindingInterceptor.Instance);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<InterceptorIntroducedCustomer>(
+                b =>
+                {
+                    b.Property(e => e.Id).ValueGeneratedNever();
+                    b.Ignore(e => e.FactoryUsed);
+                    b.Ignore(e => e.AddressAssignmentCount);
+                    b.ComplexCollection(e => e.Addresses, cb => cb.ToJson());
+                });
+    }
+
+    private class InterceptorIntroducedCustomer
+    {
+        private List<InterceptedAddress> _addresses = [];
+
+        public int Id { get; set; }
+
+        public List<InterceptedAddress> Addresses
+        {
+            get => _addresses;
+            set
+            {
+                _addresses = value;
+                AddressAssignmentCount++;
+            }
+        }
+
+        public bool FactoryUsed { get; private set; }
+        public int AddressAssignmentCount { get; private set; }
+
+        public static InterceptorIntroducedCustomer Create(List<InterceptedAddress> addresses)
+            => new() { Addresses = addresses, FactoryUsed = true };
+    }
+
+    private sealed class IntroduceCollectionBindingInterceptor : IInstantiationBindingInterceptor
+    {
+        public static readonly IntroduceCollectionBindingInterceptor Instance = new();
+
+        public InstantiationBinding ModifyBinding(
+            InstantiationBindingInterceptionData interceptionData,
+            InstantiationBinding binding)
+            => interceptionData.TypeBase.ClrType == typeof(InterceptorIntroducedCustomer)
+                ? new FactoryMethodBinding(
+                    typeof(InterceptorIntroducedCustomer).GetMethod(nameof(InterceptorIntroducedCustomer.Create))!,
+                    [
+                        new ComplexPropertyParameterBinding(
+                            interceptionData.TypeBase.FindComplexProperty(
+                                nameof(InterceptorIntroducedCustomer.Addresses))!)
+                    ],
+                    typeof(InterceptorIntroducedCustomer))
+                : binding;
+    }
+
+    private class InterceptedAddress(string street, string city)
     {
         public string Street { get; set; } = street;
         public string City { get; set; } = city;

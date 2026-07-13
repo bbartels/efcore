@@ -53,3 +53,36 @@ public sealed class ComplexCollectionMaterializationExpression(
         expressionPrinter.Append(")");
     }
 }
+
+internal sealed class StructuralTypeMaterializationExpression(
+    Expression materializationExpression,
+    IReadOnlySet<IComplexProperty> constructorConsumedComplexCollections) : Expression
+{
+    public Expression MaterializationExpression { get; } = materializationExpression;
+
+    public IReadOnlySet<IComplexProperty> ConstructorConsumedComplexCollections { get; }
+        = constructorConsumedComplexCollections;
+
+    public override Type Type
+        => MaterializationExpression.Type;
+
+    public override ExpressionType NodeType
+        => ExpressionType.Extension;
+
+    public override bool CanReduce
+        => true;
+
+    public override Expression Reduce()
+        => MaterializationExpression;
+
+    protected override Expression VisitChildren(ExpressionVisitor visitor)
+    {
+        var visitedMaterializationExpression = visitor.Visit(MaterializationExpression);
+
+        return visitedMaterializationExpression == MaterializationExpression
+            ? this
+            : new StructuralTypeMaterializationExpression(
+                visitedMaterializationExpression,
+                ConstructorConsumedComplexCollections);
+    }
+}
